@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    {% load static %}
+    <title>Land Suitability</title>
+    <link rel="stylesheet" href="{% static 'targeting_app/vendor/bootstrap/css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/leaflet.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/leaflet.draw.css' %}">
+    <style>
+        body { font-size: 12px; }
+        .navbar {
+            background-color: #093;
+            font-size: 1.2em;
+        }
+        .navbar-brand img {
+            height: 40px;
+        }
+        .navbar-nav .nav-link, .navbar-nav .dropdown-item {
+            color: white !important;
+        }
+        .navbar .nav-link:hover, .navbar .dropdown-item:hover {
+            color: #093 !important;
+            background-color: #fff !important;
+        }
+        .navbar-nav .nav-link {
+            font-size: 1.2em;
+        }
+        .navbar-nav .ml-3 {
+            margin-left: 50px; /* Increased margin for better alignment */
+        }
+        .dropdown-menu {
+            background-color: #093; /* Match dropdown background color with navbar */
+        }
+        .dropdown-item {
+            color: white !important; /* Ensure dropdown items are visible */
+        }
+        .dropdown-menu-right {
+            right: 0; /* Align the dropdown to the right */
+            left: auto; /* Override the default left alignment */
+        }
+        .dropdown-item:hover {
+            color: #093 !important;
+            background-color: #fff !important;
+        }
+        #map-container { height: 300px; }
+        .table-responsive {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .legend {
+            background: white;
+            line-height: 18px;
+            color: #333;
+            padding: 6px 8px;
+            border-radius: 4px;
+        }
+        .legend i {
+            width: 18px;
+            height: 18px;
+            float: left;
+            margin-right: 8px;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    {% include 'targeting_app/navbar.html' %}
+    <div class="container mt-4">
+        <h3>My Processed Files</h3>
+        <input type="hidden" id="csrf-token" value="{% csrf_token %}">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm">
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Created At</th>
+                                <th>Country</th>
+                                <th>Select File</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userFilesTableBody">
+                            <!-- Files will be dynamically added here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div id="map-container"></div>
+                <!-- Boundary File Upload -->
+                <div class="mt-3">
+                    <label for="boundaryFileUpload">Upload Boundary Layer (.kml,.geojson,.shp, .shx, .dbf, .prj):</label>
+                    <input type="file" id="boundaryFileUpload" accept=".kml,.geojson,.shp,.shx,.dbf,.prj" multiple>
+                    <small class="text-muted">
+                        Ensure that the .shp, .shx, and .dbf files are uploaded together. Optionally include .prj for projections.
+                    </small>
+                </div>
+
+                <div class="mt-3">
+                    <label for="zoneIdColumn">Select Zone ID Column:</label>
+                    <select id="zoneIdColumn" class="form-control" disabled>
+                        <option value="" disabled selected>Select column</option>
+                    </select>
+                </div>
+
+                <button id="processBtn" class="btn btn-primary mt-3" disabled>Process Zonal Statistics</button>
+            </div>
+
+        </div>
+        <div id="resultsSection" class="mt-5" style="display: none;">
+            <h3>Results</h3>
+            <button id="downloadCsvBtn" class="btn btn-success mt-3" style="display: none;">
+                Download CSV
+            </button>
+            <div id="resultsTable"></div>
+        </div>
+    </div>
+
+    <!-- Progress Modal -->
+<div class="modal fade" id="processingModal" tabindex="-1" aria-labelledby="processingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+                <p class="mt-3">Processing your request. Please wait...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <script src="{% static 'targeting_app/js/jquery-3.5.1.min.js' %}"></script>
+    <script src="{% static 'targeting_app/vendor/bootstrap/js/bootstrap.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/leaflet.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.1.0/chroma.min.js"></script>
+    <!-- Include shapefile.js -->
+    <script src="https://unpkg.com/shpjs@6.1.0/dist/shp.js"></script>
+
+    <!-- Include toGeoJSON.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js"></script>
+
+
+
+    <script>
+  document.addEventListener('DOMContentLoaded', function () {
+    let map = L.map('map-container').setView([0, 0], 5);
+
+    // Add base layer to the map
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    let currentRasterLayer = null; 
+    let currentBoundaryLayer = null;
+    let selectedDescription = null;
+    let currentBoundaryGeoJSON = null;
+    let selectedRasterFile = null;
+
+    async function fetchUserFiles() {
+                try {
+                    const response = await fetch('/api/getUserFiles');
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch user files.');
+                    }
+                    const files = await response.json();
+    
+                    // Sort files by created_at in descending order (latest first)
+                    files.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    return files;
+                } catch (error) {
+                    console.error('Error fetching user files:', error);
+                    alert('Could not load user files. Please try again later.');
+                    return [];
+                }
+            }
+            function populateZoneIdDropdown(boundaryGeoJSON) {
+            const dropdown = document.getElementById("zoneIdColumn");
+            dropdown.disabled = false;
+            dropdown.innerHTML = '<option value="" disabled selected>Select column</option>';
+
+            if (boundaryGeoJSON.features && boundaryGeoJSON.features.length > 0) {
+                const properties = Object.keys(boundaryGeoJSON.features[0].properties);
+                properties.forEach(prop => {
+                    const option = document.createElement("option");
+                    option.value = prop;
+                    option.textContent = prop;
+                    dropdown.appendChild(option);
+                });
+            }
+        }
+
+    document.getElementById("boundaryFileUpload").addEventListener("change", async function (event) {
+    const files = event.target.files;
+    if (!files.length) {
+        alert("Please upload a valid boundary file (Shapefile, KML, or GeoJSON).");
+        return;
+    }
+
+    const fileMap = {};
+    Array.from(files).forEach(file => {
+        const extension = file.name.split('.').pop().toLowerCase();
+        fileMap[extension] = file;
+    });
+
+    // Handle Shapefiles
+    if (fileMap["shp"] && fileMap["shx"] && fileMap["dbf"]) {
+        try {
+        const object = {};
+
+        // Read the files as ArrayBuffers and assign them to the `object`
+        object.shp = await fileMap["shp"].arrayBuffer();
+        object.shx = await fileMap["shx"].arrayBuffer();
+        object.dbf = await fileMap["dbf"].arrayBuffer();
+
+        // Optional: Add `.prj` if available (projection file)
+        if (fileMap["prj"]) {
+            object.prj = await fileMap["prj"].arrayBuffer();
+        }
+
+        // Parse the shapefile components into GeoJSON
+        currentBoundaryGeoJSON = await shp(object);
+        populateZoneIdDropdown(currentBoundaryGeoJSON);
+        enableProcessButton();
+
+        // Add the GeoJSON layer to the map
+        addBoundaryLayer(currentBoundaryGeoJSON);
+    } catch (error) {
+        console.error("Error processing Shapefile components:", error);
+        alert("Failed to process Shapefile components. Ensure all files are valid.");
+    }
+}
+
+    // Handle KML Files
+    if (fileMap["kml"]) {
+        try {
+            const kmlText = await fileMap["kml"].text();
+            currentBoundaryGeoJSON = toGeoJSON.kml(new DOMParser().parseFromString(kmlText, "text/xml")); // Convert KML to GeoJSON
+            populateZoneIdDropdown(currentBoundaryGeoJSON);
+            enableProcessButton();
+            addBoundaryLayer(currentBoundaryGeoJSON);
+        } catch (error) {
+            console.error("Error processing KML file:", error);
+            alert("Failed to process KML file.");
+        }
+    }
+
+    // Handle GeoJSON Files
+    if (fileMap["geojson"]) {
+        try {
+            const geojsonText = await fileMap["geojson"].text();
+            currentBoundaryGeoJSON = JSON.parse(geojsonText);
+            populateZoneIdDropdown(currentBoundaryGeoJSON);
+            enableProcessButton();
+            addBoundaryLayer(currentBoundaryGeoJSON);
+        } catch (error) {
+            console.error("Error processing GeoJSON file:", error);
+            alert("Failed to process GeoJSON file.");
+        }
+    }
+});
+
+
+    // Function to add boundary layer to the map
+    function addBoundaryLayer(geojson) {
+        if (currentBoundaryLayer) {
+            map.removeLayer(currentBoundaryLayer); // Remove the current boundary layer
+        }
+        currentBoundaryLayer = L.geoJSON(geojson, {
+            style: {
+                color: '#ff7800',
+                weight: 2
+            }
+        }).addTo(map);
+        map.fitBounds(currentBoundaryLayer.getBounds()); // Adjust the map view to fit the boundaries
+    }
+
+    // Function to visualize raster file on the map
+    function visualizeRasterFile(filePath, description) {
+        if (currentRasterLayer) {
+            map.removeLayer(currentRasterLayer); // Remove the previous raster layer
+        }
+
+        fetch(filePath)
+            .then(response => response.arrayBuffer())
+            .then(arrayBuffer => parseGeoraster(arrayBuffer))
+            .then(georaster => {
+                const pixelValuesToColorFn = getPixelValuesToColorFn(description, georaster);
+
+                currentRasterLayer = new GeoRasterLayer({
+                    georaster,
+                    opacity: 0.7,
+                    pixelValuesToColorFn: pixelValuesToColorFn || undefined, // Apply pixel color function if defined
+                    resolution: 256 // Adjust resolution for performance
+                });
+
+                currentRasterLayer.addTo(map);
+                map.fitBounds(currentRasterLayer.getBounds());
+            })
+            .catch(error => {
+                console.error('Error loading raster file:', error);
+                alert('Could not load the selected raster file. Please try again.');
+            });
+    }
+
+    // Function to determine the styling based on the description
+    function getPixelValuesToColorFn(description, georaster) {
+        if (description === 'Land suitability raster file') {
+            return values => {
+                const value = values[0];
+                switch (value) {
+                    case 1: return '#A87000';
+                    case 2: return '#FFD37F';
+                    case 3: return '#E9FFBE';
+                    case 4: return '#98E600';
+                    case 5: return '#267300';
+                    default: return '#00000000';
+                }
+            };
+        } else if (description === 'Mahalanobis Distance raster file') {
+            const colormapCache = {};
+            const colormap = chroma
+                .scale(['#440154', '#31688e', '#35b779', '#fde725']) // Viridis-like colormap
+                .domain([georaster.mins[0], georaster.maxs[0]]);
+
+            return values => {
+                const value = values[0];
+                if (value === georaster.nodataValue || isNaN(value)) return null;
+                if (!colormapCache[value]) {
+                    colormapCache[value] = colormap(value).hex();
+                }
+                return colormapCache[value];
+            };
+        } else {
+            // Default style for MESS raster files
+            return null;
+        }
+    }
+
+    // Fetch and display raster files and boundary files on page load
+    async function displayUserFiles() {
+                const files = await fetchUserFiles();
+                const tableBody = document.getElementById('userFilesTableBody');
+                tableBody.innerHTML = ''; // Clear existing rows
+    
+                files.forEach(file => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${file.description}</td>
+                        <td>${file.country}</td>
+                        <td>${new Date(file.created_at).toLocaleString()}</td>
+                        <td>
+                            <input type="radio" name="fileSelection" class="file-radio" value="${file.file_path}" data-description="${file.description}" />
+                        </td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+    
+                // Attach event listeners to radio buttons
+                const radioButtons = document.querySelectorAll('.file-radio');
+                radioButtons.forEach(button => {
+                    button.addEventListener('change', function () {
+                        selectedRasterFile = this.value;
+                        selectedDescription = this.dataset.description;
+                        enableProcessButton();
+                        visualizeRasterFile(selectedRasterFile, selectedDescription);
+                    });
+                });
+            }
+
+            // Function to visualize a file on the map
+           
+
+            displayUserFiles();
+
+           
+
+
+            function enableProcessButton() {
+                processBtn.disabled = !(currentBoundaryGeoJSON && selectedRasterFile);
+            }
+
+            processBtn.addEventListener('click', async function () {
+            if (!currentBoundaryGeoJSON || !selectedRasterFile) {
+                alert('Please upload a boundary file and select a raster file.');
+                return;
+            }
+
+            const selectedZoneIdColumn = document.getElementById("zoneIdColumn").value;
+
+            if (!selectedZoneIdColumn) {
+                alert("Please select a Zone ID column.");
+                return;
+            }
+
+            const csrfToken = document.getElementById('csrf-token').value;
+            $('#processingModal').modal('show');
+
+           try{
+            const response = await fetch('/api/processLandStatistics', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({
+                    boundary: currentBoundaryGeoJSON,
+                    raster_path: selectedRasterFile,
+                    description: selectedDescription,
+                    zone_id_column: selectedZoneIdColumn
+                }),
+            });
+
+
+            const data = await response.json();
+            if (data.status === 'success') {
+                displayResults(data.results);
+                $('html, body').animate({
+                    scrollTop: $('#resultsSection').offset().top
+                }, 500);
+
+                    } else {
+                        alert(`Error: ${data.message}`);
+                    }
+                } catch (error) {
+                    console.error('Error processing zonal statistics:', error);
+                }finally {
+                // Hide the processing modal
+                $('#processingModal').modal('hide');
+            }
+            });
+
+
+
+           
+        function displayResults(statistics) {
+        const resultsSection = document.getElementById('resultsSection');
+        const resultsTable = document.getElementById('resultsTable');
+        const downloadCsvBtn = document.getElementById('downloadCsvBtn');
+
+        // Collect all unique keys from the statistics to dynamically create the table header
+        const allKeys = new Set();
+        statistics.forEach(row => {
+            Object.keys(row).forEach(key => allKeys.add(key));
+        });
+
+    const keysArray = Array.from(allKeys);
+
+    resultsTable.innerHTML = `
+        <table class="table table-bordered">
+            <thead>
+                <tr>${keysArray.map(key => `<th>${key}</th>`).join('')}</tr>
+            </thead>
+            <tbody>
+                ${statistics.map(row => `
+                    <tr>${keysArray.map(key => `<td>${row[key] !== undefined ? row[key] : ''}</td>`).join('')}</tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    resultsSection.style.display = 'block';
+    downloadCsvBtn.style.display = 'inline-block';
+    downloadCsvBtn.onclick = () => downloadCsv(statistics, keysArray);
+}
+
+function downloadCsv(data, headers) {
+    const csvContent = [
+        headers.join(','), 
+        ...data.map(row => headers.map(header => `"${row[header] !== undefined ? row[header] : ''}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'results.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+
+});
+
+    </script>
+</body>
+</html>

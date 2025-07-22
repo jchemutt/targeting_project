@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    {% load static %}
+    <title>Land Suitability</title>
+    <link rel="stylesheet" href="{% static 'targeting_app/vendor/bootstrap/css/bootstrap.min.css' %}">
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/leaflet.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/leaflet.draw.css' %}">
+    <link href="{% static 'targeting_app/css/custom.css' %}" rel="stylesheet">
+    <style>
+        .file { margin-bottom: 5px; }
+        .folder > .folder-content { display: none; margin-left: 10px; }
+        .folder.expanded > .folder-content { display: block; }
+        .folder-icon { cursor: pointer; }
+
+        /* Style the folder icon */
+.folder-icon {
+    font-size: 14px;  /* Reduce the icon size */
+    vertical-align: middle;  /* Align icon with text */
+}
+
+/* Style the folder name text */
+.folder {
+    font-size: 14px;  /* Reduce the text size */
+}
+        .btn-delete { display: inline-block; }
+        .loading .spinner-border { display: inline-block; }
+        #map-container { height: 300px; }
+        .raster-parameters { margin-top: 10px; }
+        .error { color: red; font-size: 0.9em; }
+        #popup-map { height: 100%; width: 100%; }
+        .legend { background: white; line-height: 18px; color: #333; padding: 6px 8px; border-radius: 4px; }
+        .legend i { width: 18px; height: 18px; float: left; margin-right: 8px; opacity: 0.7; }
+        .navbar {
+            background-color: #093;
+        }
+        .navbar-brand img {
+            height: 40px;
+        }
+        .navbar-nav .nav-link, .navbar-nav .dropdown-item {
+            color: white !important;
+        }
+
+        .navbar .nav-link:hover, .navbar .dropdown-item:hover {
+            color: #093 !important;
+            background-color: #fff !important;
+        }
+        .navbar-nav .nav-link {
+            font-size: 1.2em;
+        }
+        .navbar-nav .ml-3 {
+            margin-left: 50px; /* Increased margin for better alignment */
+        }
+        .dropdown-menu {
+            background-color: #093; /* Match dropdown background color with navbar */
+        }
+        .dropdown-item {
+            color: white !important; /* Ensure dropdown items are visible */
+        }
+        .dropdown-menu-right {
+            right: 0; /* Align the dropdown to the right */
+            left: auto; /* Override the default left alignment */
+        }
+        .dropdown-item:hover {
+            color: #093 !important;
+            background-color: #fff !important;
+        }
+
+        .table-responsive {
+    max-height: 800px; /* Adjust the height as needed */
+    overflow-y: auto;  /* Allow vertical scroll if table overflows */
+}
+
+.table {
+    width: 100%;
+    table-layout: fixed; /* Ensure columns take up available space evenly */
+}
+
+.folder-content {
+    display: none; /* Hide all nested folders initially */
+    margin-left: 20px;
+}
+
+.folder.expanded .folder-content {
+    display: block;
+}
+
+#fileList {
+    max-height: 500px; /* Adjust height as necessary */
+    overflow-y: auto;
+}
+
+.folder-content {
+    margin-left: 10px; /* Decrease the indentation */
+}
+
+/* Style for the file names */
+.file-name {
+    font-size: 12px;  /* Adjust font size */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;  /* Adjust based on desired width */
+    display: inline-block;
+    vertical-align: middle;  /* Align with checkbox */
+}
+
+/* Custom style for checkboxes */
+.custom-checkbox {
+    height: 20px;  /* Adjust the height of the checkbox */
+    width: 20px;   /* Adjust the width of the checkbox */
+    vertical-align: middle;  /* Align checkbox vertically with text */
+}
+
+/* Adjust the height of the list items */
+.file {
+    height: 30px;  /* Fixed height for list items */
+    display: flex;
+    align-items: center;  /* Vertically align content inside the list item */
+}
+
+.small-text {
+    font-size: 12px;  /* Reduce text size */
+}
+
+.table th, .table td {
+    vertical-align: middle;  /* Ensure the content is vertically aligned */
+    padding: 0.5rem; /* Adjust padding for better alignment */
+}
+
+/* Ensure inputs, selects, and buttons are smaller and aligned */
+.small-input, .small-select {
+    font-size: 12px;  /* Smaller font size */
+    height: 28px;     /* Adjust height for a more compact look */
+    padding: 4px 8px; /* Adjust padding for better fit */
+    vertical-align: middle; /* Vertically align inputs and selects */
+}
+
+/* Ensure the buttons are horizontally aligned with inputs */
+.action-buttons {
+    /*display: flex;*/
+    justify-content: space-between; /* Space between buttons */
+    align-items: center; /* Vertically align buttons and inputs */
+    gap: 5px; /* Space between buttons */
+    height: 100%; /* Ensure it takes full height of the table cell */
+}
+
+/* Reduce button size and override Bootstrap styles */
+.action-buttons .btn {
+    padding: 3px 6px !important;  /* Smaller padding for a compact look */
+    font-size: 12px !important;   /* Smaller font size for icons */
+    display: inline-flex;
+    align-items: center; /* Vertically center content within buttons */
+    justify-content: center; /* Center content within buttons */
+}
+
+.small-text {
+    font-size: 12px; /* Reduce text size for entire section */
+}
+
+.form-check-label {
+    font-size: 12px;
+}
+
+input, button, label, h5 {
+    font-size: 12px; /* Adjust this size as per your need */
+}
+
+/* Group background colors */
+.group-1 {
+    background-color: #f9f9f9;
+}
+
+.group-2 {
+    background-color: #e9e9e9;
+}
+
+.group-3 {
+    background-color: #d9d9d9;
+}
+
+.group-4 {
+    background-color: #c9c9c9;
+}
+
+.group-5 {
+    background-color: #b9b9b9;
+}
+
+/* Style for the collapse/expand button */
+.collapse-btn {
+    margin-right: 5px;
+    padding: 0;
+    font-size: 14px;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+.collapse-btn:focus {
+    outline: none;
+}
+
+
+
+
+        
+    </style>
+</head>
+<body>
+    {% include 'targeting_app/navbar.html' %}
+    <div class="container mt-4">
+        <h3>Data - Land Suitability</h3>
+        <div class="row">
+            <div class="col-md-4">
+                <div id="fileList"></div>
+                
+            </div>
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Selected Data:</h5>
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-sm" id="rasterTable"> <!-- Added table-sm class for smaller table -->
+                                <thead>
+                                    <tr>
+                                        <th class="small-text">Group</th>
+                                        <th class="small-text">Layer</th>
+                                        <th class="small-text">Minimum Value</th>
+                                        <th class="small-text">Optimal From</th>
+                                        <th class="small-text">Optimal To</th>
+                                        <th class="small-text">Maximum Value</th>
+                                        <th class="small-text">
+                                            Combine with previous?
+                                            <span class="tooltip-trigger" data-tooltip="Select 'Yes' to combine this raster with the previous one, forming a group. Select 'No' to start a new group.">
+                                              <i class="fas fa-info-circle ml-1 text-info"></i>
+                                            </span>
+                                          </th>
+                                        <th class="small-text">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rasterTableBody" class="small-text">
+                                    <!-- Rows will be dynamically added here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="card  small-text" id="aoiSection">
+                    <div class="card-body">
+                        <h5 class="card-title">Area of Interest (AOI)</h5>
+                        
+                        <!-- Radio buttons for choosing between map and file upload -->
+                        <!-- Container for the radio buttons -->
+<div class="form-check-group d-flex align-items-center">
+    <div class="form-check mr-3">
+        <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionMap" value="map" checked>
+        <label class="form-check-label" for="aoiOptionMap">Draw on the Map</label>
+    </div>
+    <div class="form-check">
+        <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionFile" value="file">
+        <label class="form-check-label" for="aoiOptionFile">Upload File (GeoJSON)</label>
+    </div>
+</div>
+                
+                        <!-- Map section, shown by default -->
+                        <div id="mapSection" class="mt-3">
+                            <div id="map-container"></div>
+                        </div>
+                
+                        <!-- File upload section, hidden by default -->
+                        <div id="fileUploadSection" class="mt-3" style="display: none;">
+                            <label for="aoiFileUpload">Upload GeoJSON file:</label>
+                            <input type="file" id="aoiFileUpload" name="aoiFileUpload" accept=".geojson">
+                        </div>
+                    </div>
+                </div>
+                <div class="card small-text">
+                    <div class="card-body">
+                        <form id="selectedFilesForm" method="POST" action="/api/processLandSuitability" onsubmit="return validateForm(event)">
+                            {% csrf_token %}
+                            <input type="hidden" id="aoiInput" name="aoi" value="">
+                            <div class="form-group">
+                                <label for="email">Email (optional):</label>
+                                <input type="email" id="email" name="email" class="form-control" placeholder="Enter your email">
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm" id="submitBtn"><i class="fas fa-play"> </i> Run Analysis</button>
+                        </form>
+                        <div id="resultSection" class="mt-3" style="display: none;">
+                            <h4>Processing Complete</h4>
+                            <a id="downloadLink" href="#" class="btn btn-success btn-sm" download>
+                                <i class="fas fa-download"></i> Download Result
+                            </a>
+                            <button id="viewResultBtn" class="btn btn-info btn-sm">
+                                <i class="fas fa-map"></i> View Map
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+      <!-- Progress Modal -->
+    <div class="modal fade small-text" id="progressModal" tabindex="-1" role="dialog" aria-labelledby="progressModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="progressModalLabel">Processing...</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex justify-content-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="sr-only">Loading...</span>
+                        </div>
+                    </div>
+                    <p class="text-center mt-3">Please wait while your request is being processed.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Result Modal -->
+    <div class="modal fade small-text" id="resultModal" tabindex="-1" role="dialog" aria-labelledby="resultModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content" style="height: 80vh;">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="resultModalLabel">Land Suitability Map</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body p-0">
+                    <div id="popup-map" style="height: 100%; width: 100%;"></div>
+                </div>
+                <div class="modal-footer">
+            
+                    <a id="downloadLink2" href="#" class="btn btn-primary btn-sm" download><i class="fas fa-download"></i> Download Result</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+   
+
+<script src="{% static 'targeting_app/js/jquery-3.5.1.min.js' %}"></script>
+    <!--<script src="{% static 'targeting_app/js/popper.min.js' %}"></script>-->
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script src="{% static 'targeting_app/vendor/bootstrap/js/bootstrap.min.js' %}"></script>
+    
+    <script src="{% static 'targeting_app/js/leaflet.js' %}"></script>
+    <script src="{% static 'targeting_app/js/leaflet.draw.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/rainbowvis.js' %}"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/tippy.js@6/dist/tippy.css">
+<script src="https://unpkg.com/@popperjs/core@2"></script>
+<script src="https://unpkg.com/tippy.js@6"></script>
+
+
+    <script>
+
+document.querySelectorAll('.folder-icon').forEach((icon) => {
+    icon.addEventListener('click', (event) => {
+        const folder = event.target.closest('.folder');
+        folder.classList.toggle('expanded');
+    });
+});
+
+        // Define the validateOptiFrom function
+    function validateOptiFrom(input, minVal) {
+        const value = parseFloat(input.value);
+        if (isNaN(value) || value <= minVal) {
+            alert(`Optimum From must be greater than Minimum Value (${minVal}).`);
+            input.value = '';
+            input.focus();
+        }
+    }
+
+    // Define the validateOptiTo function
+    function validateOptiTo(input, maxVal) {
+        const value = parseFloat(input.value);
+        if (isNaN(value) || value >= maxVal) {
+            alert(`Optimum To must be less than Maximum Value (${maxVal}).`);
+            input.value = '';
+            input.focus();
+        }
+    }
+    $(document).ready(function() {
+        tippy('.tooltip-trigger', {
+    content: (reference) => reference.getAttribute('data-tooltip'),
+    placement: 'top',
+  });
+    const mapSection = document.getElementById('mapSection');
+    const fileUploadSection = document.getElementById('fileUploadSection');
+    const aoiOptionMap = document.getElementById('aoiOptionMap');
+    const aoiOptionFile = document.getElementById('aoiOptionFile');
+
+    // Event listener for "Choose from Map" radio button
+    aoiOptionMap.addEventListener('change', () => {
+        if (aoiOptionMap.checked) {
+            mapSection.style.display = 'block'; // Show the map section
+            fileUploadSection.style.display = 'none'; // Hide the file upload section
+        }
+    });
+
+    // Event listener for "Upload File" radio button
+    aoiOptionFile.addEventListener('change', () => {
+        if (aoiOptionFile.checked) {
+            mapSection.style.display = 'none'; // Hide the map section
+            fileUploadSection.style.display = 'block'; // Show the file upload section
+            }
+           });
+
+           document.getElementById('aoiFileUpload').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+
+    reader.onload = function (e) {
+        const fileContent = e.target.result; // Read file content
+        aoiInput.value = fileContent; // Store in hidden input
+    };
+
+    if (file) {
+        reader.readAsText(file); // Read the uploaded file
+    }
+});
+            const fileListElement = document.getElementById('fileList');
+            const selectedFilesForm = document.getElementById('selectedFilesForm');
+            const selectedFilesContainer = document.getElementById('selectedFilesContainer');
+            const aoiInput = document.getElementById('aoiInput');
+            //const spinner = document.querySelector('.spinner-border');
+            let map;
+            let resultUrl = "";
+            let popupMap;
+            let drawnItems = new L.FeatureGroup();
+
+            // Leaflet map setup
+            function setupMap() {
+                map = L.map('map-container').setView([0, 0], 1); // Default view, will be updated dynamically
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(map);
+
+                map.addLayer(drawnItems); // Add drawn items layer to the map
+
+                // Initialize Leaflet Draw
+                const drawOptions = {
+                    position: 'topleft',
+                    draw: {
+                        rectangle: true,
+                        polygon: true,
+                        polyline: false,
+                        circle: false,
+                        marker: false,
+                        circlemarker: false
+                    },
+                    edit: {
+                        featureGroup: drawnItems,
+                        remove: true // Allow removing drawn items
+                    }
+                };
+                const drawControl = new L.Control.Draw(drawOptions);
+                map.addControl(drawControl);
+
+                // Event listener for rectangle drawn
+                map.on(L.Draw.Event.CREATED, function (event) {
+                    drawnItems.clearLayers(); // Clear previous drawn layers
+                    const layer = event.layer;
+                    drawnItems.addLayer(layer); // Add new drawn layer
+
+                    if (event.layerType === 'rectangle') {
+                        // If it's a rectangle, use bounds
+                        const bounds = layer.getBounds();
+                        const aoistr = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+                        aoiInput.value = aoistr; // Store AOI bounds
+                    } else if (event.layerType === 'polygon') {
+                        // If it's a polygon, capture the vertices
+                        const latLngs = layer.getLatLngs()[0]; // Assuming a simple polygon (no holes)
+                        const polygonCoords = latLngs.map(latlng => `${latlng.lat},${latlng.lng}`).join(';');
+                        aoiInput.value = polygonCoords; // Store the polygon vertices as a string
+                    }
+
+                    layer.addTo(map);
+                });
+
+                 // Event listener for deleted shapes
+                    map.on('draw:deleted', function () {
+                        drawnItems.clearLayers(); // Clear all drawn layers
+                        aoiInput.value = ''; // Clear the AOI input field
+                    });
+            }
+
+            function clearDrawnLayers() {
+                drawnItems.clearLayers();
+                aoiInput.value = '';
+            }
+
+            // Function to fetch directory contents from Django view
+            async function fetchDirectoryContents(directoryPath) {
+                //showLoading();
+                try {
+                    const response = await fetch(`/api/getDirectoryContents?path=${encodeURIComponent(directoryPath)}`);
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch directory contents');
+                    }
+                    return await response.json();
+                } catch (error) {
+                    console.error('Error fetching directory contents:', error);
+                    alert('Failed to load directory contents. Please try again later.');
+                    return [];
+                } finally {
+                    //hideLoading();
+                }
+            }
+
+            // Function to fetch folder configurations from Django view
+            async function fetchFolderConfigurations(folderName) {
+                try {
+                    const response = await fetch(`/api/getFolderConfigurations?folder=${encodeURIComponent(folderName)}`);
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch folder configurations');
+                    }
+                    return await response.json();
+                } catch (error) {
+                    console.error('Error fetching folder configurations:', error);
+                    alert('Failed to load folder configurations. Please try again later.');
+                    return { center: [0, 0], zoom: 2 }; // Default to world view
+                }
+            }
+
+            // Function to update map view based on folder configurations
+            async function updateMapView(folderName) {
+                const { center, zoom } = await fetchFolderConfigurations(folderName);
+                map.setView(center, zoom);
+            }
+
+            // Function to sanitize file path for valid CSS selector
+            function sanitizeFilePath(filePath) {
+    // Replace all non-alphanumeric characters with underscores to make it a valid CSS selector
+    return filePath.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+            // Function to display directory contents
+            async function displayDirectoryContents(directoryContents, parentElement, directoryPath) {
+                const ul = document.createElement('ul');
+                ul.classList.add('list-group');
+
+                directoryContents.forEach(item => {
+                    const li = document.createElement('li');
+                    li.classList.add('list-group-item');
+
+                    if (item.type === 'directory') {
+                        li.classList.add('folder');
+                        li.innerHTML = `<i class="fas fa-caret-right folder-icon mr-2"></i><i class="fas fa-folder mr-2"></i>${item.name}`;
+                        li.style.cursor = 'pointer';
+                        li.addEventListener('click', async (event) => {
+                            event.stopPropagation();
+                            if (!li.dataset.loaded) {
+                                const subDirectoryContents = await fetchDirectoryContents(`${directoryPath}/${item.name}`);
+                                displayDirectoryContents(subDirectoryContents, li.querySelector('.folder-content'), `${directoryPath}/${item.name}`);
+                                li.dataset.loaded = true;
+                            }
+                            li.classList.toggle('expanded');
+                            const folderContent = li.querySelector('.folder-content');
+                            folderContent.style.display = folderContent.style.display === 'block' ? 'none' : 'block';
+                            const folderIcon = li.querySelector('.folder-icon');
+                            folderIcon.classList.toggle('fa-caret-right');
+                            folderIcon.classList.toggle('fa-caret-down');
+                            // Update map view when folder is clicked
+                            updateMapView(item.name);
+                        });
+                        const folderContent = document.createElement('div');
+                        folderContent.classList.add('folder-content');
+                        li.appendChild(folderContent);
+                    } else if (item.type === 'file') {
+    li.classList.add('file');
+    li.style.height = '30px';  // Set a fixed height for the list item
+    
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = `${directoryPath}/${item.name}`;
+    checkbox.classList.add('mr-2');  // Add a custom class for styling
+    
+    checkbox.addEventListener('click', (event) => {
+        event.stopPropagation(); // Prevent propagation to parent li
+    });
+    
+    checkbox.addEventListener('change', () => {
+    if (checkbox.checked) {
+        addSelectedFile(checkbox.value, item.name, item.min_val, item.max_val);
+    }  else {
+        removeSelectedFileByFilePath(checkbox.value);
+    }
+});
+
+    const label = document.createElement('label');
+    label.classList.add('file-name');  // Add this class for styling
+    label.textContent = item.name;
+    label.style.lineHeight = '30px';  // Ensure label text is vertically aligned with the checkbox
+
+    // Add the title attribute to show full file name on hover
+    label.setAttribute('title', item.name);
+
+    li.appendChild(checkbox);
+    li.appendChild(label);
+}
+
+ul.appendChild(li);
+                });
+
+                parentElement.appendChild(ul);
+            }
+
+
+
+// Global raster counter for unique raster IDs
+let rasterCounter = 0;
+
+// Object to store rows grouped by group number
+let groupRows = {};
+
+
+// Function to add a selected file to the table
+function addSelectedFile(filePath, fileName, minVal, maxVal) {
+    rasterCounter++;
+    const rasterId = rasterCounter; // Unique identifier for each raster
+
+    const sanitizedFilePath = sanitizeFilePath(filePath);
+
+    const tableBody = document.getElementById('rasterTableBody');
+    const isFirstRaster = tableBody.rows.length === 0;
+
+    const row = document.createElement('tr');
+    row.setAttribute('data-raster-id', rasterId);
+    row.setAttribute('data-original-filepath', filePath);
+    console.log(`Adding raster: ${filePath}, rasterId: ${rasterId}`);
+    row.innerHTML = `
+        <td class="group-cell"></td>
+        <td>${fileName}</td>
+       <td><input type="text" class="form-control form-control-sm small-input" name="rasterParameters[${sanitizedFilePath}][min_val]" value="${minVal}"></td>
+        <td><input type="text" class="form-control form-control-sm small-input" name="rasterParameters[${sanitizedFilePath}][opti_from]" placeholder="Optimal From" onchange="validateOptiFrom(this, ${minVal})"></td>
+        <td><input type="text" class="form-control form-control-sm small-input" name="rasterParameters[${sanitizedFilePath}][opti_to]" placeholder="Optimal To" onchange="validateOptiTo(this, ${maxVal})"></td>
+        <td><input type="text" class="form-control form-control-sm small-input" name="rasterParameters[${sanitizedFilePath}][max_val]" value="${maxVal}"></td>
+        <td>
+            <select id="combine_${sanitizedFilePath}" name="rasterParameters[${sanitizedFilePath}][combine]" class="form-control form-control-sm">
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+            </select>
+        </td>
+        <td class="action-buttons">
+            <button type="button" class="btn btn-secondary btn-sm move-up-btn"><i class="fas fa-arrow-up"></i></button>
+            <button type="button" class="btn btn-secondary btn-sm move-down-btn"><i class="fas fa-arrow-down"></i></button>
+            <button type="button" class="btn btn-danger btn-sm remove-btn"><i class="fas fa-trash"></i></button>
+        </td>
+    `;
+
+    tableBody.appendChild(row);
+
+    // Attach event listeners for the buttons after adding the row
+    row.querySelector('.remove-btn').addEventListener('click', () => removeSelectedFile(rasterId));
+    row.querySelector('.move-up-btn').addEventListener('click', () => moveRow(row, 'up'));
+    row.querySelector('.move-down-btn').addEventListener('click', () => moveRow(row, 'down'));
+
+    // Attach event listener for the combine select element
+    const combineSelect = row.querySelector(`#combine_${sanitizedFilePath}`);
+    combineSelect.addEventListener('change', updateCombineOptions);
+
+    // Update combine options and visual grouping after adding a new raster
+    updateCombineOptions();
+}
+
+// Function to remove a selected file from the table
+function removeSelectedFile(rasterId) {
+    // Find the table row using the raster ID
+    const row = document.querySelector(`tr[data-raster-id="${rasterId}"]`);
+
+    if (row) {
+        // Get the original file path from the data attribute
+        const originalFilePath = row.getAttribute('data-original-filepath');
+
+        // Remove the row from the table
+        row.remove();
+
+        // Uncheck the corresponding checkbox using the original file path
+        const checkbox = document.querySelector(`input[type="checkbox"][value="${originalFilePath}"]`);
+
+        if (checkbox) {
+            checkbox.checked = false;
+        } else {
+            console.warn(`Checkbox for file "${originalFilePath}" not found.`);
+        }
+
+        // Update combine options and visual grouping after removing a raster
+        updateCombineOptions();
+    } else {
+        console.warn(`Row with data-raster-id="${rasterId}" not found.`);
+    }
+}
+
+// Function to move a row up or down
+function moveRow(row, direction) {
+    const tableBody = row.parentNode;
+    if (direction === 'up') {
+        const prevRow = row.previousElementSibling;
+        if (prevRow) {
+            tableBody.insertBefore(row, prevRow);
+        }
+    } else if (direction === 'down') {
+        const nextRow = row.nextElementSibling;
+        if (nextRow) {
+            tableBody.insertBefore(nextRow.nextElementSibling, row);
+        }
+    }
+    // Update combine options and visual grouping after moving a raster
+    updateCombineOptions();
+}
+
+// Function to update combine options and visual grouping
+function updateCombineOptions() {
+    const tableBody = document.getElementById('rasterTableBody');
+    const rows = Array.from(tableBody.querySelectorAll('tr'));
+    let currentGroup = 1;
+    groupRows = {}; // Reset groupRows object
+
+    rows.forEach((row, index) => {
+        const rasterId = row.getAttribute('data-raster-id'); // Keep the original rasterId
+
+        // Update the name attributes for inputs using the current index
+        const inputs = row.querySelectorAll('input, select');
+        inputs.forEach(input => {
+            const name = input.getAttribute('name');
+            if (name) {
+                const newName = name.replace(/rasterParameters\[\d+\]/, `rasterParameters[${index}]`);
+                input.setAttribute('name', newName);
+            }
+        });
+
+        // Update combine options
+        const combineSelect = row.querySelector('select[name*="[combine]"]');
+        if (index === 0) {
+            // First raster cannot be combined with previous
+            combineSelect.value = 'No';
+            combineSelect.disabled = true;
+            row.setAttribute('data-group', currentGroup);
+        } else {
+            combineSelect.disabled = false;
+
+            const prevRow = rows[index - 1];
+            const prevGroup = parseInt(prevRow.getAttribute('data-group'));
+
+            if (combineSelect.value === 'Yes') {
+                // Same group as previous
+                row.setAttribute('data-group', prevGroup);
+            } else {
+                // Start a new group
+                currentGroup++;
+                row.setAttribute('data-group', currentGroup);
+            }
+        }
+
+        // Collect rows per group
+        const groupNumber = parseInt(row.getAttribute('data-group'));
+        if (!groupRows[groupNumber]) {
+            groupRows[groupNumber] = [];
+        }
+        groupRows[groupNumber].push(row);
+
+        // Update group cell
+        const groupCell = row.querySelector('.group-cell');
+        if (groupCell) {
+            if (index === 0 || row.getAttribute('data-group') !== rows[index - 1].getAttribute('data-group')) {
+                // This is the first row of a group
+                groupCell.innerHTML = `
+                    <button type="button" class="btn btn-link collapse-btn" data-group="${groupNumber}">[-]</button>
+                    Group ${groupNumber}
+                `;
+                groupCell.querySelector('.collapse-btn').addEventListener('click', toggleGroup);
+            } else {
+                // Not the first row of the group; clear the group cell
+                groupCell.innerHTML = '';
+            }
+        }
+
+        // Remove existing group classes
+        row.classList.remove('group-1', 'group-2', 'group-3', 'group-4', 'group-5');
+        // Apply new group class (cycle through predefined styles)
+        const groupClass = `group-${(groupNumber % 5) + 1}`; 
+        row.classList.add(groupClass);
+    });
+}
+
+// Function to toggle the collapse/expand of groups
+function toggleGroup(event) {
+    const groupNumber = event.target.getAttribute('data-group');
+    const isCollapsed = event.target.textContent === '[+]';
+    event.target.textContent = isCollapsed ? '[-]' : '[+]';
+
+    groupRows[groupNumber].forEach(row => {
+        if (row !== event.target.closest('tr')) {
+            row.style.display = isCollapsed ? '' : 'none';
+        }
+    });
+}
+
+
+function removeSelectedFileByFilePath(filePath) {
+    // Find the table row using the data-original-filepath
+    const row = document.querySelector(`tr[data-original-filepath="${filePath}"]`);
+
+    if (row) {
+        // Remove the row from the table
+        row.remove();
+
+        // Update combine options and visual grouping after removing a raster
+        updateCombineOptions();
+    } else {
+        console.warn(`Row with data-original-filepath="${filePath}" not found.`);
+    }
+}
+
+
+        
+            // Validate form before submission
+function validateForm(event) {
+ event.preventDefault(); // Prevent the form from submitting
+
+const selectedRows = document.querySelectorAll('#rasterTableBody tr');
+    if (selectedRows.length < 2) {
+        alert('Please select at least two files.');
+        return false;
+    }
+
+    const rasterParameters = {};
+    let isValid = true;
+
+    selectedRows.forEach(row => {
+     // Get the original file path from the row's data attribute
+        const originalFilePath = row.getAttribute('data-original-filepath');
+
+        // Get the rasterId from the row's data attribute
+        const rasterId = row.getAttribute('data-raster-id');
+
+        console.log(`Validating raster: ${originalFilePath} with rasterId: ${rasterId}`);
+
+        const minValInput = row.querySelector(`input[name="rasterParameters[${sanitizeFilePath(originalFilePath)}][min_val]"]`);
+        const maxValInput = row.querySelector(`input[name="rasterParameters[${sanitizeFilePath(originalFilePath)}][max_val]"]`);
+        const optiFromInput = row.querySelector(`input[name="rasterParameters[${sanitizeFilePath(originalFilePath)}][opti_from]"]`);
+        const optiToInput = row.querySelector(`input[name="rasterParameters[${sanitizeFilePath(originalFilePath)}][opti_to]"]`);
+        const combineInput = row.querySelector(`select[name="rasterParameters[${sanitizeFilePath(originalFilePath)}][combine]"]`);
+
+       
+
+        
+        const minVal = minValInput.value;
+        const maxVal = maxValInput.value;
+        const optiFrom = optiFromInput.value;
+        const optiTo = optiToInput.value;
+
+        // Check if all inputs exist
+            if (!minVal || !maxVal || !optiFrom || !optiTo ) {
+
+            alert(`One or more inputs are missing in the row: ${rasterId}`);
+            isValid = false;
+            return false; 
+            }
+
+        if (!optiFrom || !optiTo || parseFloat(optiFrom) <= parseFloat(minVal) || parseFloat(optiTo) >= parseFloat(maxVal)) {
+            alert('Opti From must be greater than Min Value and Opti To must be less than Max Value.');
+            isValid = false;
+            return false;
+        }
+
+     
+
+        rasterParameters[originalFilePath] = {
+            opti_from: optiFrom,
+            opti_to: optiTo,
+            min_val: minVal,
+            max_val: maxVal,
+            combine: combineInput.value
+        };
+    });
+
+    if (!isValid) {
+        return false;
+    }
+
+    const email = document.getElementById('email').value;
+
+    const formData = {
+        selectedFiles: Array.from(selectedRows).map(row => row.getAttribute('data-original-filepath')),
+        rasterParameters: rasterParameters,
+        aoi: aoiInput.value || '',
+        email: email || '',
+    };
+
+
+                // Show progress modal
+                $('#progressModal').modal('show');
+
+                fetch('/api/processLandSuitability', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                    },
+                    body: JSON.stringify(formData)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    $('#progressModal').modal('hide');
+                    if (data.status === 'success') {
+                        resultUrl = data.result_url;
+                        //console.error('resultUrl:', resultUrl);
+                        $('#downloadLink').attr('href', resultUrl);
+                        $('#downloadLink2').attr('href', resultUrl);
+                        $('#resultSection').show();
+
+            
+
+                    // Scroll the page to the result section
+                      $('html, body').animate({
+                    scrollTop: $('#resultSection').offset().top
+                }, 500);
+
+                        
+                    } else {
+                        alert(`Error: ${data.message}`);
+                    }
+                })
+                .catch(error => {
+                    $('#progressModal').modal('hide');
+                    //console.error('Error:', error);
+                    alert('An error occurred while processing the form.');
+                });
+
+                return false;
+            }
+
+            document.getElementById('submitBtn').addEventListener('click', validateForm);
+
+            // Fetch and display the root directory contents on page load
+            fetchDirectoryContents('/')
+                .then(directoryContents => displayDirectoryContents(directoryContents, fileListElement, ''))
+                .catch(error => console.error('Error displaying root directory contents:', error));
+
+            // Initialize Leaflet map
+            setupMap();
+
+            // View Result Button
+            $('#viewResultBtn').on('click', function () {
+                $('#resultModal').modal('show');
+                displayResultOnMap(resultUrl);
+            });
+
+            function displayResultOnMap(url) {
+
+                if (popupMap) {
+                    popupMap.remove();
+            }
+                $('#resultModal').on('shown.bs.modal', function () {
+                    popupMap = L.map('popup-map').setView([0, 0], 5);
+
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(popupMap);
+
+                fetch(resultUrl)
+                    .then(response => response.arrayBuffer())
+                    .then(arrayBuffer => parseGeoraster(arrayBuffer))
+                    .then(georaster => {
+                        const pixelValuesToColorFn = values => {
+                            const value = values[0]; // Assuming the raster only has one band
+                            switch(value) {
+                                case 1: return '#ffaa00';
+                                case 2: return '#ff7f7f';
+                                case 3: return '#e6e600';
+                                case 4: return '#70a800';
+                                case 5: return '#267300';
+                                default: return '#00000000'; // Transparent for undefined values
+                            }
+                        };
+
+                        const layer = new GeoRasterLayer({
+                            georaster,
+                            opacity: 0.7,
+                            pixelValuesToColorFn: pixelValuesToColorFn
+                        });
+                        layer.addTo(popupMap);
+                        popupMap.fitBounds(layer.getBounds());
+
+                        const legend = L.control({ position: 'bottomright' });
+
+                legend.onAdd = function () {
+                    const div = L.DomUtil.create('div', 'legend');
+                    div.innerHTML += '<i style="background: #ffaa00"></i> Very Low<br>';
+                    div.innerHTML += '<i style="background: #ff7f7f"></i> Low<br>';
+                    div.innerHTML += '<i style="background: #e6e600"></i> Medium<br>';
+                    div.innerHTML += '<i style="background: #70a800"></i> High<br>';
+                    div.innerHTML += '<i style="background: #267300"></i> Very High<br>';
+                    return div;
+                };
+
+                legend.addTo(popupMap);
+                    })
+                    .catch(error => {
+                        console.error('Error loading TIFF:', error);
+                        alert('Error loading TIFF file.');
+                    });
+                
+                
+                
+                
+                
+                    });
+            }
+        });
+    </script>
+</body>
+</html>

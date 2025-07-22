@@ -1,0 +1,1271 @@
+[
+    {
+        "name": "ethiopia_annual_evapo_transpiration.tif",
+        "min_val": 1239,
+        "max_val": 2901
+    },
+    {
+        "name": "ethiopia_annual_precipitation.tif",
+        "min_val": 102,
+        "max_val": 2002
+    },
+    {
+        "name": "ethiopia_annual_temperature.tif",
+        "min_val": 5.375000036632021,
+        "max_val": 34.116666873296104
+    },
+    {
+        "name": "ethiopia_elevation.tif",
+        "min_val": -75,
+        "max_val": 4403
+    },
+    {
+        "name": "ethiopia_failed_season_drought_probability.tif",
+        "min_val": 0,
+        "max_val": 99
+    },
+    {
+        "name": "ethiopia_flood_hazard _100_years_(cm).tif",
+        "min_val": 5,
+        "max_val": 652.0321044921875
+    },
+    {
+        "name": "ethiopia_flood_hazard _25_years_(cm).tif",
+        "min_val": 5.137645721435547,
+        "max_val": 444.7799377441406
+    },
+    {
+        "name": "ethiopia_flood_hazard_50_years_(cm).tif",
+        "min_val": 5.017185211181641,
+        "max_val": 650.8883056640625
+    },
+    {
+        "name": "ethiopia_heat_stress_livestock_2000.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_heat_stress_livestock_2030_rcp45.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_heat_stress_livestock_2030_rcp85.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_heat_stress_livestock_2050_rcp45.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_heat_stress_livestock_2050_rcp85.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_length_of_growing_period_in_days.tif",
+        "min_val": 1,
+        "max_val": 14
+    },
+    {
+        "name": "ethiopia_lgp_days.tif",
+        "min_val": 0,
+        "max_val": 313
+    },
+    {
+        "name": "ethiopia_livestock_production_systems.tif",
+        "min_val": 2,
+        "max_val": 14
+    },
+    {
+        "name": "ethiopia_ndvi.tif",
+        "min_val": -0.0889233946800232,
+        "max_val": 0.11187413334846497
+    },
+    {
+        "name": "ethiopia_number_of_dry_days_2000.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_number_of_dry_days_rcp45_2030.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_number_of_dry_days_rcp45_2050.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_number_of_dry_days_rcp85_2030.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_number_of_dry_days_rcp85_2050.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_population_count.tif",
+        "min_val": 0.14327074587345123,
+        "max_val": 45014.0859375
+    },
+    {
+        "name": "ethiopia_population_density.tif",
+        "min_val": 0,
+        "max_val": 64307.5234375
+    },
+    {
+        "name": "ethiopia_soil_organic_carbon.tif",
+        "min_val": 2,
+        "max_val": 144
+    },
+    {
+        "name": "ethiopia_soil_ph.tif",
+        "min_val": 4.800000190734863,
+        "max_val": 9
+    },
+    {
+        "name": "ethiopia_soil_type.tif",
+        "min_val": 1,
+        "max_val": 117
+    },
+    {
+        "name": "ethiopia_soil_water_stress_2000.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_soil_water_stress_rcp45_2020_2049.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_soil_water_stress_rcp45_2040_2069.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_soil_water_stress_rcp85_2020_2049.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_soil_water_stress_rcp85_2040_2069.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_thornthwaite_aridity_index_2000.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_thornthwaite_aridity_index_2030_rcp45.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_thornthwaite_aridity_index_2030_rcp85.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_thornthwaite_aridity_index_2050_rcp45.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_thornthwaite_aridity_index_2050_rcp85.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "ethiopia_warm_spell_duration_2020_2039_ssp245.tif",
+        "min_val": 74,
+        "max_val": 137
+    },
+    {
+        "name": "ethiopia_warm_spell_duration_2020_2039_ssp585.tif",
+        "min_val": 79,
+        "max_val": 139
+    },
+    {
+        "name": "ethiopia_waterlogging_2000.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "ethiopia_waterlogging_rcp45_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "ethiopia_waterlogging_rcp45_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "ethiopia_waterlogging_rcp85_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "ethiopia_waterlogging_rcp85_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {"name": "ghana_livestock_density.tif", "min_val": 0, "max_val": 82.82711791992188},
+    {"name": "ghana_mean_annual_rainfall_(mm).tif", "min_val": 778.2959594726562, "max_val": 2277.20068359375},
+    {"name": "ghana_mean_annual_temperature.tif", "min_val": "nan", "max_val": "nan"},
+    {"name": "ghana_proximity_to_rivers_(m).tif", "min_val": 0, "max_val": 62427.37109375},
+    {"name": "ghana_proximity_to_roads_(m).tif", "min_val": 0, "max_val": 82806.1796875},
+    {"name": "ghana_slope_in_percentage.tif", "min_val": 0, "max_val": 370.1253967285156},
+    {"name": "ghana_soil_nitrogen_(g_kg).tif", "min_val": 0.27300000190734863, "max_val": 4.539999961853027},
+    {"name": "ghana_soil_organic_carbon_30cm.tif", "min_val": 1.6666666269302368, "max_val": 102.33333587646484},
+    {"name": "ghana_soil_ph.tif", "min_val": 3.9000000953674316, "max_val": 7.5},
+    {
+        "name": "kenya_annual_evapo_transpiration.tif",
+        "min_val": 937,
+        "max_val": 2944
+    },
+    {
+        "name": "kenya_annual_precipitation.tif",
+        "min_val": 144,
+        "max_val": 2680
+    },
+    {
+        "name": "kenya_annual_temperature.tif",
+        "min_val": 1.9333333397905033,
+        "max_val": 33.43333347638448
+    },
+    {
+        "name": "kenya_elevation.tif",
+        "min_val": -11,
+        "max_val": 4865
+    },
+    {
+        "name": "kenya_failed_season_drought_probability.tif",
+        "min_val": 0,
+        "max_val": 99
+    },
+    {
+        "name": "kenya_flood_hazard _100_years_(cm).tif",
+        "min_val": 5.001865386962891,
+        "max_val": 705.9771118164062
+    },
+    {
+        "name": "kenya_flood_hazard _25_years_(cm).tif",
+        "min_val": 5.001865386962891,
+        "max_val": 432.77935791015625
+    },
+    {
+        "name": "kenya_flood_hazard_50_years_(cm).tif",
+        "min_val": 5.001865386962891,
+        "max_val": 647.9213256835938
+    },
+    {
+        "name": "kenya_heat_stress_livestock_2000.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_heat_stress_livestock_2030_rcp45.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_heat_stress_livestock_2030_rcp85.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_heat_stress_livestock_2050_rcp45.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_heat_stress_livestock_2050_rcp85.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_lgp_days.tif",
+        "min_val": 0,
+        "max_val": 326
+    },
+    {
+        "name": "kenya_livestock_production_systems.tif",
+        "min_val": 1,
+        "max_val": 14
+    },
+    {
+        "name": "kenya_ndvi.tif",
+        "min_val": -0.08262822031974792,
+        "max_val": 0.10471837222576141
+    },
+    {
+        "name": "kenya_number_of_dry_days_2000.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_number_of_dry_days_rcp45_2030.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_number_of_dry_days_rcp45_2050.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_number_of_dry_days_rcp85_2030.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_number_of_dry_days_rcp85_2050.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_population_count.tif",
+        "min_val": 0,
+        "max_val": 76706.4375
+    },
+    {
+        "name": "kenya_population_density.tif",
+        "min_val": 0,
+        "max_val": 75787.640625
+    },
+    {
+        "name": "kenya_soil_organic_carbon.tif",
+        "min_val": 0,
+        "max_val": 184
+    },
+    {
+        "name": "kenya_soil_ph.tif",
+        "min_val": 4.699999809265137,
+        "max_val": 9.899999618530273
+    },
+    {
+        "name": "kenya_soil_type.tif",
+        "min_val": 1,
+        "max_val": 117
+    },
+    {
+        "name": "kenya_soil_water_stress_2000.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_soil_water_stress_rcp45_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_soil_water_stress_rcp45_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_soil_water_stress_rcp85_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_soil_water_stress_rcp85_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_thornthwaite_aridity_index_2000.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_thornthwaite_aridity_index_2030_rcp45.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_thornthwaite_aridity_index_2030_rcp85.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_thornthwaite_aridity_index_2050_rcp45.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_thornthwaite_aridity_index_2050_rcp85.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "kenya_warm_spell_duration_2020_2039_ssp245.tif",
+        "min_val": 88,
+        "max_val": 226
+    },
+    {
+        "name": "kenya_warm_spell_duration_2020_2039_ssp585.tif",
+        "min_val": 80,
+        "max_val": 245
+    },
+    {
+        "name": "kenya_waterlogging_2000.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_waterlogging_rcp45_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_waterlogging_rcp45_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_waterlogging_rcp85_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "kenya_waterlogging_rcp85_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "mali_failed_season_drought_probability.tif",
+        "min_val": 1,
+        "max_val": 97
+    },
+    {
+        "name": "mali_flood_hazard _100_years_(cm).tif",
+        "min_val": 5,
+        "max_val": 609.75244140625
+    },
+    {
+        "name": "mali_flood_hazard _25_years_(cm).tif",
+        "min_val": 5.0024333000183105,
+        "max_val": 435.05517578125
+    },
+    {
+        "name": "mali_flood_hazard_50_years_(cm).tif",
+        "min_val": 5.0024333000183105,
+        "max_val": 559.0219116210938
+    },
+    {
+        "name": "mali_heat_stress_livestock_2000.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_heat_stress_livestock_2030_rcp45.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_heat_stress_livestock_2030_rcp85.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_heat_stress_livestock_2050_rcp45.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_heat_stress_livestock_2050_rcp85.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_length_of_growing_period_in_days.tif",
+        "min_val": 1,
+        "max_val": 9
+    },
+    {
+        "name": "mali_number_of_dry_days_2000.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_number_of_dry_days_rcp45_2030.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "mali_number_of_dry_days_rcp45_2050.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "mali_number_of_dry_days_rcp85_2030.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "mali_number_of_dry_days_rcp85_2050.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "mali_soil_water_stress_2000.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "mali_soil_water_stress_rcp45_2020_2049.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_soil_water_stress_rcp45_2040_2069.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_soil_water_stress_rcp85_2020_2049.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_soil_water_stress_rcp85_2040_2069.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_thornthwaite_aridity_index_2000.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_thornthwaite_aridity_index_2030_rcp45.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_thornthwaite_aridity_index_2030_rcp85.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_thornthwaite_aridity_index_2050_rcp45.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_thornthwaite_aridity_index_2050_rcp85.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "mali_warm_spell_duration_2020_2039_ssp245.tif",
+        "min_val": 77,
+        "max_val": 106
+    },
+    {
+        "name": "mali_warm_spell_duration_2020_2039_ssp585.tif",
+        "min_val": 72,
+        "max_val": 121
+    },
+    {
+        "name": "mali_waterlogging_2000.tif",
+        "min_val": 1,
+        "max_val": 2
+    },
+    {
+        "name": "mali_waterlogging_rcp45_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "mali_waterlogging_rcp45_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "mali_waterlogging_rcp85_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "mali_waterlogging_rcp85_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "rwanda_annual_evapo_transpiration.tif",
+        "min_val": 837,
+        "max_val": 1620
+    },
+    {
+        "name": "rwanda_annual_precipitation.tif",
+        "min_val": 821,
+        "max_val": 1880
+    },
+    {
+        "name": "rwanda_annual_temperature.tif",
+        "min_val": 6.404166589180629,
+        "max_val": 23.074999968210857
+    },
+    {
+        "name": "rwanda_elevation.tif",
+        "min_val": 930,
+        "max_val": 4159
+    },
+    {
+        "name": "rwanda_elevation_pr.tif",
+        "min_val": 930,
+        "max_val": 4159
+    },
+    {
+        "name": "rwanda_lgp_days.tif",
+        "min_val": 181,
+        "max_val": 314
+    },
+    {
+        "name": "rwanda_livestock_production_systems.tif",
+        "min_val": 7,
+        "max_val": 14
+    },
+    {
+        "name": "rwanda_ndvi.tif",
+        "min_val": -0.06393962353467941,
+        "max_val": 0.044106047600507736
+    },
+    {
+        "name": "rwanda_population_count.tif",
+        "min_val": 0,
+        "max_val": 21155.046875
+    },
+    {
+        "name": "rwanda_population_density.tif",
+        "min_val": 0,
+        "max_val": 27926.642578125
+    },
+    {
+        "name": "rwanda_soil_organic_carbon.tif",
+        "min_val": 10,
+        "max_val": 117
+    },
+    {
+        "name": "rwanda_soil_ph.tif",
+        "min_val": 4.699999809265137,
+        "max_val": 6.599999904632568
+    },
+    {
+        "name": "rwanda_soil_type.tif",
+        "min_val": 1,
+        "max_val": 115
+    },
+    {
+        "name": "senegal_failed_season_drought_probability.tif",
+        "min_val": 1,
+        "max_val": 92
+    },
+    {
+        "name": "senegal_flood_hazard _100_years_(cm).tif",
+        "min_val": 5.010030746459961,
+        "max_val": 546.5045776367188
+    },
+    {
+        "name": "senegal_flood_hazard _25_years_(cm).tif",
+        "min_val": 5.03171443939209,
+        "max_val": 377.79339599609375
+    },
+    {
+        "name": "senegal_flood_hazard_50_years_(cm).tif",
+        "min_val": 5.03171443939209,
+        "max_val": 501.2845458984375
+    },
+    {
+        "name": "senegal_heat_stress_livestock_2000.tif",
+        "min_val": 3,
+        "max_val": 3
+    },
+    {
+        "name": "senegal_heat_stress_livestock_2030_rcp45.tif",
+        "min_val": 3,
+        "max_val": 3
+    },
+    {
+        "name": "senegal_heat_stress_livestock_2030_rcp85.tif",
+        "min_val": 3,
+        "max_val": 3
+    },
+    {
+        "name": "senegal_heat_stress_livestock_2050_rcp45.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_heat_stress_livestock_2050_rcp85.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_length_of_growing_period_in_days.tif",
+        "min_val": 2,
+        "max_val": 8
+    },
+    {
+        "name": "senegal_number_of_dry_days_2000.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_number_of_dry_days_rcp45_2030.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_number_of_dry_days_rcp45_2050.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_number_of_dry_days_rcp85_2030.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_number_of_dry_days_rcp85_2050.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_soil_water_stress_2000.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_soil_water_stress_rcp45_2020_2049.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_soil_water_stress_rcp45_2040_2069.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_soil_water_stress_rcp85_2020_2049.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_soil_water_stress_rcp85_2040_2069.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_thornthwaite_aridity_index_2000.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_thornthwaite_aridity_index_2030_rcp45.tif",
+        "min_val": 4,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_thornthwaite_aridity_index_2030_rcp85.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_thornthwaite_aridity_index_2050_rcp45.tif",
+        "min_val": 3,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_thornthwaite_aridity_index_2050_rcp85.tif",
+        "min_val": 4,
+        "max_val": 4
+    },
+    {
+        "name": "senegal_warm_spell_duration_2020_2039_ssp245.tif",
+        "min_val": 65,
+        "max_val": 153
+    },
+    {
+        "name": "senegal_warm_spell_duration_2020_2039_ssp585.tif",
+        "min_val": 60,
+        "max_val": 155
+    },
+    {
+        "name": "senegal_waterlogging_2000.tif",
+        "min_val": 1,
+        "max_val": 2
+    },
+    {
+        "name": "senegal_waterlogging_rcp45_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "senegal_waterlogging_rcp45_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "senegal_waterlogging_rcp85_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "senegal_waterlogging_rcp85_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "tanzania_annual_evapo_transpiration.tif",
+        "min_val": 670,
+        "max_val": 2596
+    },
+    {
+        "name": "tanzania_annual_precipitation.tif",
+        "min_val": 310,
+        "max_val": 2500
+    },
+    {
+        "name": "tanzania_annual_temperature.tif",
+        "min_val": -5.033333354319136,
+        "max_val": 29.508333206176758
+    },
+    {
+        "name": "tanzania_elevation.tif",
+        "min_val": -3,
+        "max_val": 5845
+    },
+    {
+        "name": "tanzania_failed_season_drought_probability.tif",
+        "min_val": 0,
+        "max_val": 82
+    },
+    {
+        "name": "tanzania_flood_hazard _100_years_(cm).tif",
+        "min_val": 5,
+        "max_val": 626.5045776367188
+    },
+    {
+        "name": "tanzania_flood_hazard _25_years_(cm).tif",
+        "min_val": 5.129893779754639,
+        "max_val": 438.8421936035156
+    },
+    {
+        "name": "tanzania_flood_hazard_50_years_(cm).tif",
+        "min_val": 5.129893779754639,
+        "max_val": 575.1893310546875
+    },
+    {
+        "name": "tanzania_heat_stress_livestock_2000.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "tanzania_heat_stress_livestock_2030_rcp45.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "tanzania_heat_stress_livestock_2030_rcp85.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "tanzania_heat_stress_livestock_2050_rcp45.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "tanzania_heat_stress_livestock_2050_rcp85.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "tanzania_length_of_growing_period_in_days.tif",
+        "min_val": 3,
+        "max_val": 14
+    },
+    {
+        "name": "tanzania_livestock_production_systems.tif",
+        "min_val": 1,
+        "max_val": 14
+    },
+    {
+        "name": "tanzania_ndvi.tif",
+        "min_val": -0.08223562687635422,
+        "max_val": 0.09310836344957352
+    },
+    {
+        "name": "tanzania_number_of_dry_days_2000.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_number_of_dry_days_rcp45_2030.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_number_of_dry_days_rcp45_2050.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_number_of_dry_days_rcp85_2030.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_number_of_dry_days_rcp85_2050.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_population_count.tif",
+        "min_val": 0,
+        "max_val": 54187.94921875
+    },
+    {
+        "name": "tanzania_population_density.tif",
+        "min_val": 0,
+        "max_val": 32209.21875
+    },
+    {
+        "name": "tanzania_soil_organic_carbon.tif",
+        "min_val": 0,
+        "max_val": 180
+    },
+    {
+        "name": "tanzania_soil_ph.tif",
+        "min_val": 4.199999809265137,
+        "max_val": 9.399999618530273
+    },
+    {
+        "name": "tanzania_soil_type.tif",
+        "min_val": 1,
+        "max_val": 117
+    },
+    {
+        "name": "tanzania_soil_water_stress_2000.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_soil_water_stress_rcp45_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_soil_water_stress_rcp45_2040_2069.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_soil_water_stress_rcp85_2020_2049.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_soil_water_stress_rcp85_2040_2069.tif",
+        "min_val": 2,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_thornthwaite_aridity_index_2000.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_thornthwaite_aridity_index_2030_rcp45.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_thornthwaite_aridity_index_2030_rcp85.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_thornthwaite_aridity_index_2050_rcp45.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_thornthwaite_aridity_index_2050_rcp85.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_warm_spell_duration_2020_2039_ssp245.tif",
+        "min_val": 87,
+        "max_val": 264
+    },
+    {
+        "name": "tanzania_warm_spell_duration_2020_2039_ssp585.tif",
+        "min_val": 82,
+        "max_val": 256
+    },
+    {
+        "name": "tanzania_waterlogging_2000.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "tanzania_waterlogging_rcp45_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_waterlogging_rcp45_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tanzania_waterlogging_rcp85_2020_2049.tif",
+        "min_val": 1,
+        "max_val": 3
+    },
+    {
+        "name": "tanzania_waterlogging_rcp85_2040_2069.tif",
+        "min_val": 1,
+        "max_val": 4
+    },
+    {
+        "name": "tunisia_failed_season_drought_probability.tif",
+        "min_val": 1,
+        "max_val": 39
+    },
+    {
+        "name": "tunisia_flood_hazard _100_years_(cm).tif",
+        "min_val": 5.036916255950928,
+        "max_val": 602.6807250976562
+    },
+    {
+        "name": "tunisia_flood_hazard _25_years_(cm).tif",
+        "min_val": 5.441812515258789,
+        "max_val": 445.63677978515625
+    },
+    {
+        "name": "tunisia_flood_hazard_50_years_(cm).tif",
+        "min_val": 5.015225887298584,
+        "max_val": 544.6517944335938
+    },
+    {
+        "name": "global_annual_evapo_transpiration.tif",
+        "min_val": 0,
+        "max_val": 4147
+    },
+    {
+        "name": "global_annual_precipitation.tif",
+        "min_val": 0,
+        "max_val": 11256
+    },
+    {
+        "name": "global_aridity_index_ETO.tif",
+        "min_val": 0,
+        "max_val": 100000
+    },
+    {
+        "name": "global_bean_rainfed_harvested_area.tif",
+        "min_val": 0,
+        "max_val": 7654.39990234375
+    },
+    {
+        "name": "global_cassava_rainfed_harvested_area.tif",
+        "min_val": 0,
+        "max_val": 5083.7998046875
+    },
+    {
+        "name": "global_cattle_density_2010.tif",
+        "min_val": 0,
+        "max_val": 8213.453125
+    },
+    {
+        "name": "global_chicken_density_2010.tif",
+        "min_val": 0,
+        "max_val": 295302.875
+    },
+    {
+        "name": "global_elevation.tif",
+        "min_val": -398,
+        "max_val": 8377
+    },
+    {
+        "name": "global_field_size.tif",
+        "min_val": 10,
+        "max_val": 40
+    },
+    {
+        "name": "global_goat_density_2010.tif",
+        "min_val": 0,
+        "max_val": 4707.21337890625
+    },
+    {
+        "name": "global_land_cover.tif",
+        "min_val": 10,
+        "max_val": 220
+    },
+    {
+        "name": "global_length_of_growing_period_in_days.tif",
+        "min_val": 0,
+        "max_val": 365
+    },
+    {
+        "name": "global_livestock_production_systems.tif",
+        "min_val": 1,
+        "max_val": 14
+    },
+    {
+        "name": "global_market_access.tif",
+        "min_val": 0,
+        "max_val": 41556
+    },
+    {
+        "name": "global_ndvi.tif",
+        "min_val": -0.18857413530349731,
+        "max_val": 0.23951691389083862
+    },
+    {
+        "name": "global_nitrogen_fertilizer_application.tif",
+        "min_val": 0,
+        "max_val": 220.9770050048828
+    },
+    {
+        "name": "global_nitrogen_manure_application.tif",
+        "min_val": 0,
+        "max_val": 369.20599365234375
+    },
+    {
+        "name": "global_organic_carbon.tif",
+        "min_val": 0,
+        "max_val": 627
+    },
+    {
+        "name": "global_phosphorus_fertilizer_application.tif",
+        "min_val": 0,
+        "max_val": 96.38300323486328
+    },
+    {
+        "name": "global_phosphorus_manure_application.tif",
+        "min_val": 0,
+        "max_val": 63.86399841308594
+    },
+    {
+        "name": "global_population_count.tif",
+        "min_val": 0,
+        "max_val": 240747.140625
+    },
+    {
+        "name": "global_population_density.tif",
+        "min_val": 0,
+        "max_val": 169205.078125
+    },
+    {
+        "name": "global_rainfed_bean_yield.tif",
+        "min_val": 0,
+        "max_val": 13333.2998046875
+    },
+    {
+        "name": "global_rainfed_cassava_yield.tif",
+        "min_val": 0,
+        "max_val": 120033.703125
+    },
+    {
+        "name": "global_rainfed_groundnuts_yield.tif",
+        "min_val": 0,
+        "max_val": 44500
+    },
+    {
+        "name": "global_rainfed_maize_yield.tif",
+        "min_val": 0,
+        "max_val": 59000
+    },
+    {
+        "name": "global_rainfed_pearlmillet_yield.tif",
+        "min_val": 0,
+        "max_val": 22807.69921875
+    },
+    {
+        "name": "global_rainfed_potato_yield.tif",
+        "min_val": 0,
+        "max_val": 321939.8125
+    },
+    {
+        "name": "global_rice_rainfed_harvested_area.tif",
+        "min_val": 0,
+        "max_val": 7952.2998046875
+    },
+    {
+        "name": "global_sheep_density_2010.tif",
+        "min_val": 0,
+        "max_val": 9439.40234375
+    },
+    {
+        "name": "global_soil_ph.tif",
+        "min_val": 3.5,
+        "max_val": 10.300000190734863
+    },
+    {
+        "name": "global_soil_type.tif",
+        "min_val": 1,
+        "max_val": 118
+    },
+    {
+        "name": "global_temperature.tif",
+        "min_val": -53.73750019073486,
+        "max_val": 34.116666873296104
+    },
+    {
+        "name": "global_thermal_climate_zones.tif",
+        "min_val": -997,
+        "max_val": 10
+    },
+    {
+        "name": "colombia_annual_mean_temperature.tif",
+        "min_val": -1.2958333492279053,
+        "max_val": 29.554166793823242
+    },
+    {
+        "name": "colombia_failed_season_drought_probability.tif",
+        "min_val": 0,
+        "max_val": 80
+    },
+    {
+        "name": "colombia_flood_hazard_100_years_in_cm.tif",
+        "min_val": 5,
+        "max_val": 612.6074829101562
+    },
+    {
+        "name": "colombia_flood_hazard_25_years_in_cm.tif",
+        "min_val": 5.0360426902771,
+        "max_val": 445.46075439453125
+    },
+    {
+        "name": "colombia_flood_hazard_50_years_cm.tif",
+        "min_val": 5,
+        "max_val": 565.92529296875
+    },
+    {
+        "name": "colombia_max_temperature_of_warmest_month.tif",
+        "min_val": 3.200000047683716,
+        "max_val": 36.599998474121094
+    },
+    {
+        "name": "colombia_min_temperature_of_coldest_month.tif",
+        "min_val": -7.199999809265137,
+        "max_val": 24.299999237060547
+    }
+]

@@ -1,0 +1,20 @@
+name: targeting
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - numpy
+  - rasterio
+  - shapely
+  - pyproj
+  - django
+  - geopandas
+  - geojson
+  - gdal
+  - rasterstats
+  - psycopg2
+  - gunicorn
+  - pip
+  - pip:
+      - dbfread

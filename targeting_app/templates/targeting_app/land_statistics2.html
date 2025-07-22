@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    {% load static %}
+    <title>Land Statistics</title>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <meta name="keywords" content="Land Statistics, Similarity, Suitability, Land Similarity, Land Suitability, Targeting Tool">
+    <meta name="description" content="Targeting Tools is a set of tools available on Web.">
+    <meta name="author" content="">
+      <!-- Favicon -->
+      <link rel="icon" href="{% static 'targeting_app/images/ciat-icon-48.png' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/vendor/bootstrap/css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/leaflet.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/leaflet.draw.css' %}">
+    <link href="{% static 'targeting_app/css/custom.css' %}" rel="stylesheet">
+    <style>
+        body { font-size: 12px; }
+        .navbar {
+            background-color: #093;
+            font-size: 1.2em;
+        }
+        .navbar-brand img {
+            height: 40px;
+        }
+        .navbar-nav .nav-link, .navbar-nav .dropdown-item {
+            color: white !important;
+        }
+        .navbar .nav-link:hover, .navbar .dropdown-item:hover {
+            color: #093 !important;
+            background-color: #fff !important;
+        }
+        .navbar-nav .nav-link {
+            font-size: 1.2em;
+        }
+        .navbar-nav .ml-3 {
+            margin-left: 50px; /* Increased margin for better alignment */
+        }
+        .dropdown-menu {
+            background-color: #093; /* Match dropdown background color with navbar */
+        }
+        .dropdown-item {
+            color: white !important; /* Ensure dropdown items are visible */
+        }
+        .dropdown-menu-right {
+            right: 0; /* Align the dropdown to the right */
+            left: auto; /* Override the default left alignment */
+        }
+        .dropdown-item:hover {
+            color: #093 !important;
+            background-color: #fff !important;
+        }
+        #map-container { height: 300px; }
+        .table-responsive {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .legend {
+            background: white;
+            line-height: 18px;
+            color: #333;
+            padding: 6px 8px;
+            border-radius: 4px;
+        }
+        .legend i {
+            width: 18px;
+            height: 18px;
+            float: left;
+            margin-right: 8px;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    {% include 'targeting_app/navbar.html' %}
+    <div class="container mt-4">
+        <h3>My Processed Files</h3>
+        <input type="hidden" id="csrf-token" value="{% csrf_token %}">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm">
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Created At</th>
+                                <th>Select File</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userFilesTableBody">
+                            <!-- Files will be dynamically added here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <!-- Table for form inputs -->
+                <table class="table table-bordered mb-3">
+                  <tbody>
+                    <tr>
+                      <td><strong>Select Reference Layer</strong></td>
+                      <td>
+                        <select id="zoneIdColumn" class="form-control">
+                          <option value="">Select Reference Layer</option>
+                        </select>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><strong>Select Statistic Types</strong></td>
+                      <td>
+                        <div class="dropdown">
+                          <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="statDropdown"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            Statistic Types
+                          </button>
+                          <div class="dropdown-menu" aria-labelledby="statDropdown">
+                            <label class="dropdown-item">
+                              <input type="checkbox" class="stat-checkbox" id="allStatsCheckbox" value="All"> All
+                            </label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="mean"> Mean</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="sum"> Sum</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="median"> Median</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="min"> Minimum</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="max"> Maximum</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="std"> Standard Deviation</label>
+                           
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              
+                <!-- Map container -->
+                <div id="map-container" style="height: 300px;"></div>
+              
+                <!-- Process button -->
+                <button id="processBtn" class="btn btn-primary mt-3" disabled>Process Statistics</button>
+              </div>
+
+        </div>
+        <div id="resultsSection" class="mt-5" style="display: none;">
+            <h3>Results</h3>
+            <button id="downloadCsvBtn" class="btn btn-success mt-3" style="display: none;">
+                Download CSV
+            </button>
+            <button id="plotChartBtn" class="btn btn-info mt-3 ml-2" style="display: none;">
+                Plot
+            </button>
+            <div id="resultsTable"></div>
+        </div>
+    </div>
+
+
+    <div class="modal fade" id="chartModal" tabindex="-1" aria-labelledby="chartModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="chartModalLabel">Land Statistics Chart</h5>
+              <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                <span>&times;</span>
+              </button>
+            </div>
+            <div class="modal-body">
+              <label for="statSelect">Select Statistic to Plot:</label>
+              <select id="statSelect" class="form-control mb-3"></select>
+              <canvas id="statChart" height="100"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    <!-- Progress Modal -->
+<div class="modal fade" id="processingModal" tabindex="-1" aria-labelledby="processingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+                <p class="mt-3">Processing your request. Please wait...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% include 'targeting_app/footer.html' %}
+    <script src="{% static 'targeting_app/js/jquery-3.5.1.min.js' %}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script src="{% static 'targeting_app/vendor/bootstrap/js/bootstrap.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/leaflet.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.1.0/chroma.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+
+
+
+    <script>
+  document.addEventListener('DOMContentLoaded', function () {
+
+
+ // Handle "All" checkbox logic
+document.getElementById('allStatsCheckbox').addEventListener('change', function () {
+  const checkboxes = document.querySelectorAll('.stat-checkbox:not(#allStatsCheckbox)');
+  checkboxes.forEach(cb => cb.checked = this.checked);
+  updateStatDropdownLabel();
+});
+
+// Watch individual checkboxes for changes
+document.querySelectorAll('.stat-checkbox:not(#allStatsCheckbox)').forEach(cb => {
+  cb.addEventListener('change', function () {
+    const allStatsCheckbox = document.getElementById('allStatsCheckbox');
+    const otherCheckboxes = document.querySelectorAll('.stat-checkbox:not(#allStatsCheckbox)');
+    const allChecked = Array.from(otherCheckboxes).every(checkbox => checkbox.checked);
+    allStatsCheckbox.checked = allChecked; // Only check "All" if all individual checkboxes are checked
+    updateStatDropdownLabel();
+  });
+});
+
+// Update dropdown label based on selection
+function updateStatDropdownLabel() {
+  const selectedStats = getSelectedStatistics();
+  const btn = document.getElementById('statDropdown');
+  if (selectedStats.length === 0) {
+    btn.textContent = 'Statistic Types';
+  } else if (selectedStats.length <= 2) {
+    btn.textContent = selectedStats.join(', ');
+  } else {
+    btn.textContent = `${selectedStats.length} selected`;
+  }
+}
+
+// Function to get selected statistics (excluding "All")
+function getSelectedStatistics() {
+  const checkboxes = document.querySelectorAll('.stat-checkbox:checked:not(#allStatsCheckbox)');
+  return Array.from(checkboxes).map(cb => cb.value);
+}
+
+
+  
+    let map = L.map('map-container').setView([0, 0], 5);
+
+    // Add base layer to the map
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    let currentRasterLayer = null; 
+    let selectedDescription = null;
+    let selectedRasterFile = null;
+   
+        let selectedCountry = "";
+        let selectedReferenceFile = "";
+        const referenceSelect = document.querySelector("#zoneIdColumn");
+
+    async function fetchUserFiles() {
+                try {
+                    const response = await fetch('/api/getUserFiles');
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch user files.');
+                    }
+                    const files = await response.json();
+    
+                    // Sort files by created_at in descending order (latest first)
+                    files.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    return files;
+                } catch (error) {
+                    console.error('Error fetching user files:', error);
+                    alert('Could not load user files. Please try again later.');
+                    return [];
+                }
+            }
+           
+
+
+
+    // Function to visualize raster file on the map
+    function visualizeRasterFile(filePath, description) {
+        if (currentRasterLayer) {
+            map.removeLayer(currentRasterLayer); // Remove the previous raster layer
+        }
+
+        fetch(filePath)
+            .then(response => response.arrayBuffer())
+            .then(arrayBuffer => parseGeoraster(arrayBuffer))
+            .then(georaster => {
+                const pixelValuesToColorFn = getPixelValuesToColorFn(description, georaster);
+
+                currentRasterLayer = new GeoRasterLayer({
+                    georaster,
+                    opacity: 0.7,
+                    pixelValuesToColorFn: pixelValuesToColorFn || undefined, // Apply pixel color function if defined
+                    resolution: 256 // Adjust resolution for performance
+                });
+
+                currentRasterLayer.addTo(map);
+                map.fitBounds(currentRasterLayer.getBounds());
+            })
+            .catch(error => {
+                console.error('Error loading raster file:', error);
+                alert('Could not load the selected raster file. Please try again.');
+            });
+    }
+
+    function getPixelValuesToColorFn(description, georaster) {
+    if (description === 'Land suitability raster file') {
+        return values => {
+            const value = values[0];
+            switch (value) {
+                case 1: return '#A87000';
+                case 2: return '#FFD37F';
+                case 3: return '#E9FFBE';
+                case 4: return '#98E600';
+                case 5: return '#267300';
+                default: return '#00000000';
+            }
+        };
+    } else if (description === 'Mahalanobis Distance raster file') {
+        // Quantile-classified version (discrete classes 1–5)
+        return values => {
+            const value = values[0];
+            switch (value) {
+                case 1: return '#A87000';
+                case 2: return '#FFD37F';
+                case 3: return '#E9FFBE';
+                case 4: return '#98E600';
+                case 5: return '#267300';
+                default: return '#00000000'; // Transparent for nodata or out of range
+            }
+        };
+    
+    } else {
+        // Default for other raster types (e.g., MESS)
+        return null;
+    }
+}
+
+
+    // Function to determine the styling based on the description
+    function getPixelValuesToColorFn(description, georaster) {
+        if (description === 'Land suitability raster file') {
+            return values => {
+                const value = values[0];
+                switch (value) {
+                    case 1: return '#A87000';
+                    case 2: return '#FFD37F';
+                    case 3: return '#E9FFBE';
+                    case 4: return '#98E600';
+                    case 5: return '#267300';
+                    default: return '#00000000';
+                }
+            };
+        } else if (description === 'Mahalanobis Distance raster file') {
+            const colormapCache = {};
+            const colormap = chroma
+                .scale(['#440154', '#31688e', '#35b779', '#fde725']) // Viridis-like colormap
+                .domain([georaster.mins[0], georaster.maxs[0]]);
+
+            return values => {
+                const value = values[0];
+                if (value === georaster.nodataValue || isNaN(value)) return null;
+                if (!colormapCache[value]) {
+                    colormapCache[value] = colormap(value).hex();
+                }
+                return colormapCache[value];
+            };
+        } else {
+            // Default style for MESS raster files
+            return null;
+        }
+    }
+
+    // Fetch and display raster files and boundary files on page load
+    async function displayUserFiles() {
+                const files = await fetchUserFiles();
+                const tableBody = document.getElementById('userFilesTableBody');
+                tableBody.innerHTML = ''; // Clear existing rows
+    
+                files.forEach(file => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${file.title}</td>
+                        <td>${new Date(file.created_at).toLocaleString()}</td>
+                        <td>
+                            <input type="radio" name="fileSelection" class="file-radio" value="${file.file_path}" data-description="${file.description}" data-country="${file.country}"/>
+                        </td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+    
+                // Attach event listeners to radio buttons
+                const radioButtons = document.querySelectorAll('.file-radio');
+                radioButtons.forEach(button => {
+                    button.addEventListener('change', async function ()  {
+                        selectedRasterFile = this.value;
+                        selectedDescription = this.dataset.description;
+                        selectedCountry = this.dataset.country;
+                        enableProcessButton();
+                        visualizeRasterFile(selectedRasterFile, selectedDescription);
+                        await fetchReferenceLayers(selectedCountry);
+                    });
+                });
+            }
+
+            async function fetchReferenceLayers(rasterFile) {
+            try {
+                console.log(rasterFile);
+              const referencelayer = rasterFile.replace(/\\/g, "/");
+               const url = `/api/getReferenceLayers?raster_path=${encodeURIComponent(referencelayer)}`;
+               //console.log(url);
+                const response = await fetch(url);
+                if (!response.ok) {
+                    //throw new Error('Failed to fetch reference layers.');
+                }
+
+                const data = await response.json(); // Parse JSON response
+                const referenceLayers = data.raster_files;
+                referenceSelect.innerHTML = '<option value="">Select Reference Layer</option>'; // Clear previous options
+                
+                if (!referenceLayers || referenceLayers.length === 0) {
+                    referenceSelect.innerHTML += '<option value="" disabled>No reference layers available</option>';
+                    return;
+                }
+
+                referenceLayers.forEach(layer => {
+                    const option = document.createElement("option");
+                    option.value = layer.file_path;  // Set value to the file path
+                    option.textContent = layer.name; // Display name
+                    referenceSelect.appendChild(option);
+                });
+
+                // Remove old event listeners and add a fresh one
+                referenceSelect.removeEventListener('change', handleReferenceChange);
+                referenceSelect.addEventListener('change', handleReferenceChange);
+
+            } catch (error) {
+                console.error('Error fetching reference layers:', error);
+                alert('Could not load reference layers. Please try again.');
+                referenceSelect.innerHTML = '<option value="" disabled>Error loading layers</option>';
+            }
+        }
+
+        function handleReferenceChange() {
+            selectedReferenceFile = this.value;
+            enableProcessButton();
+        }
+
+
+            // Function to visualize a file on the map
+           
+
+            displayUserFiles();
+
+           
+
+
+            function enableProcessButton() {
+                processBtn.disabled = !(selectedReferenceFile && selectedRasterFile);
+            }
+
+            processBtn.addEventListener('click', async function () {
+            if (!selectedReferenceFile || !selectedRasterFile) {
+                alert('Please select reference file and select a raster file.');
+                return;
+            }
+
+           
+            const selectedStats = getSelectedStatistics();
+            if (selectedStats.length === 0) {
+            alert("Please select at least one statistic type.");
+            return;
+            }
+
+            const csrfToken = document.getElementById('csrf-token').value;
+            $('#processingModal').modal('show');
+
+           try{
+            const response = await fetch('/api/processStatistics', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({
+                    reference_layer: selectedReferenceFile,
+                    raster_path: selectedRasterFile,
+                    description: selectedDescription,
+                    stat_types: selectedStats
+                }),
+            });
+
+
+            const data = await response.json();
+            console.log("Response received:", data);
+            if (data.status === 'success') {
+                displayResults(data.results);
+                $('html, body').animate({
+                    scrollTop: $('#resultsSection').offset().top
+                }, 500);
+
+                    } else {
+                        alert(`Error: ${data.message}`);
+                    }
+                } catch (error) {
+                    console.error('Error processing zonal statistics:', error);
+                }finally {
+                // Hide the processing modal
+                setTimeout(() => {
+                    $('#processingModal').modal('hide');
+    }, 500);
+            }
+            });
+
+
+            let statChartInstance = null;
+           
+            function displayResults(statistics) {
+    const resultsSection = document.getElementById('resultsSection');
+    const resultsTable = document.getElementById('resultsTable');
+    const downloadCsvBtn = document.getElementById('downloadCsvBtn');
+    const plotChartBtn = document.getElementById('plotChartBtn');
+
+    if (!statistics || statistics.length === 0) {
+        resultsTable.innerHTML = '<p>No data available.</p>';
+        return;
+    }
+
+    const statLabel = statistics[0].stat_label;
+    const statsPerClass = statistics[0].statistics;
+
+    const classes = Object.keys(statLabel);
+    const selectedStats = getSelectedStatistics();
+
+    // Build dynamic table header
+    let headerRow = `
+        <th>Class</th>
+        <th>Land Suitability Area (%)</th>
+    `;
+    selectedStats.forEach(stat => {
+        headerRow += `<th>${stat.charAt(0).toUpperCase() + stat.slice(1)}</th>`;
+    });
+
+    // Build table body
+    let bodyRows = '';
+    classes.forEach(cls => {
+        let row = `<td>${cls}</td><td>${statLabel[cls]}</td>`;
+        selectedStats.forEach(stat => {
+            const value = statsPerClass[cls]?.[stat];
+            row += `<td>${value !== null && value !== undefined ? value.toFixed(2) : 'N/A'}</td>`;
+        });
+        bodyRows += `<tr>${row}</tr>`;
+    });
+
+    // Set the final HTML
+    resultsTable.innerHTML = `
+        <h3>Land Statistics</h3>
+        <table class="table table-bordered">
+            <thead><tr>${headerRow}</tr></thead>
+            <tbody>${bodyRows}</tbody>
+        </table>
+    `;
+
+    resultsSection.style.display = 'block';
+    downloadCsvBtn.style.display = 'inline-block';
+    plotChartBtn.style.display = 'inline-block';
+    downloadCsvBtn.onclick = () => downloadCsv(classes, statLabel, statsPerClass, selectedStats);
+
+    const statSelect = document.getElementById('statSelect');
+    statSelect.innerHTML = selectedStats.map(stat => `<option value="${stat}">${stat}</option>`).join('');
+    statSelect.onchange = () => renderChart(statSelect.value, classes, statsPerClass);
+
+    // On plot button click
+    plotChartBtn.onclick = () => {
+        const defaultStat = statSelect.value || selectedStats[0];
+        renderChart(defaultStat, classes, statsPerClass);
+        $('#chartModal').modal('show');
+    };
+}
+
+// Chart rendering function
+function renderChart(stat, classes, statsPerClass) {
+    const ctx = document.getElementById('statChart').getContext('2d');
+
+    const values = classes.map(cls => statsPerClass[cls]?.[stat] ?? 0);
+
+    if (statChartInstance) {
+        statChartInstance.destroy();
+    }
+
+    statChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: classes,
+            datasets: [{
+                label: stat.charAt(0).toUpperCase() + stat.slice(1),
+                data: values,
+                backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: true },
+                tooltip: { enabled: true }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        precision: 0
+                    }
+                }
+            }
+        }
+    });
+}
+
+
+function downloadCsv(classes, statLabel, statsPerClass, selectedStats) {
+    const headers = ['Class', 'Area (%)', ...selectedStats];
+    const rows = classes.map(cls => {
+        const values = [cls, statLabel[cls]];
+        selectedStats.forEach(stat => {
+            const value = statsPerClass[cls]?.[stat];
+            values.push(value !== null && value !== undefined ? value.toFixed(2) : 'N/A');
+        });
+        return values.join(',');
+    });
+
+    const csvContent = [headers.join(','), ...rows].join('\n');
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "land_statistics_results.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+
+
+
+});
+
+    </script>
+</body>
+</html>

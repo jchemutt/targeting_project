@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    {% load static %}
+    <title>Land Suitability</title>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <meta name="keywords" content="Land Statistics, Similarity, Suitability, Land Similarity, Land Suitability, Targeting Tool">
+    <meta name="description" content="Targeting Tools is a set of tools available on Web.">
+    <meta name="author" content="">
+
+    <!-- Favicon -->
+    <link rel="icon" href="{% static 'targeting_app/images/ciat-icon-48.png' %}">
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="{% static 'targeting_app/vendor/bootstrap/css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/leaflet.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/leaflet.draw.css' %}">
+    <link rel="stylesheet" href="https://unpkg.com/tippy.js@6/dist/tippy.css">
+    <link href="{% static 'targeting_app/css/custom.css' %}" rel="stylesheet">
+    <style>
+        body { font-size: 12px; }
+        .file { margin-bottom: 5px; }
+        .folder > .folder-content { display: none; margin-left: 10px; }
+        .folder.expanded > .folder-content { display: block; }
+        .folder-icon { cursor: pointer; }
+
+        /* Style the folder icon */
+.folder-icon {
+    font-size: 14px;  /* Reduce the icon size */
+    vertical-align: middle;  /* Align icon with text */
+}
+
+/* Style the folder name text */
+.folder {
+    font-size: 14px;  /* Reduce the text size */
+}
+        .btn-delete { display: inline-block; }
+        .loading .spinner-border { display: inline-block; }
+        #map-container { height: 300px; }
+        .raster-parameters { margin-top: 10px; }
+        .error { color: red; font-size: 0.9em; }
+        #popup-map { height: 100%; width: 100%; }
+        .legend { background: white; line-height: 18px; color: #333; padding: 6px 8px; border-radius: 4px; }
+        .legend i { width: 18px; height: 18px; float: left; margin-right: 8px; opacity: 0.7; }
+        .navbar {
+            background-color: #093;
+            font-size: 1.2em;
+        }
+        .navbar-brand img {
+            height: 40px;
+        }
+        .navbar-nav .nav-link, .navbar-nav .dropdown-item {
+            color: white !important;
+        }
+
+        .navbar .nav-link:hover, .navbar .dropdown-item:hover {
+            color: #093 !important;
+            background-color: #fff !important;
+        }
+        .navbar-nav .nav-link {
+            font-size: 1.2em;
+        }
+        .navbar-nav .ml-3 {
+            margin-left: 50px; /* Increased margin for better alignment */
+        }
+        .dropdown-menu {
+            background-color: #093; /* Match dropdown background color with navbar */
+        }
+        .dropdown-item {
+            color: white !important; /* Ensure dropdown items are visible */
+        }
+        .dropdown-menu-right {
+            right: 0; /* Align the dropdown to the right */
+            left: auto; /* Override the default left alignment */
+        }
+        .dropdown-item:hover {
+            color: #093 !important;
+            background-color: #fff !important;
+        }
+
+        .table-responsive {
+    max-height: 800px; /* Adjust the height as needed */
+    overflow-y: auto;  /* Allow vertical scroll if table overflows */
+}
+
+.table {
+    width: 100%;
+    table-layout: fixed; /* Ensure columns take up available space evenly */
+}
+
+.folder-content {
+    display: none; /* Hide all nested folders initially */
+    margin-left: 20px;
+}
+
+.folder.expanded .folder-content {
+    display: block;
+}
+
+#fileList {
+    max-height: 500px; /* Adjust height as necessary */
+    overflow-y: auto;
+}
+
+.folder-content {
+    margin-left: 10px; /* Decrease the indentation */
+}
+
+/* Style for the file names */
+.file-name {
+    font-size: 12px;  /* Adjust font size */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;  /* Adjust based on desired width */
+    display: inline-block;
+    vertical-align: middle;  /* Align with checkbox */
+}
+
+/* Custom style for checkboxes */
+.custom-checkbox {
+    height: 20px;  /* Adjust the height of the checkbox */
+    width: 20px;   /* Adjust the width of the checkbox */
+    vertical-align: middle;  /* Align checkbox vertically with text */
+}
+
+/* Adjust the height of the list items */
+.file {
+    height: 30px;  /* Fixed height for list items */
+    display: flex;
+    align-items: center;  /* Vertically align content inside the list item */
+}
+
+.small-text {
+    font-size: 12px;  /* Reduce text size */
+}
+
+.table th, .table td {
+    vertical-align: middle;  /* Ensure the content is vertically aligned */
+    padding: 0.5rem; /* Adjust padding for better alignment */
+}
+
+/* Ensure inputs, selects, and buttons are smaller and aligned */
+.small-input, .small-select {
+    font-size: 12px;  /* Smaller font size */
+    height: 28px;     /* Adjust height for a more compact look */
+    padding: 4px 8px; /* Adjust padding for better fit */
+    vertical-align: middle; /* Vertically align inputs and selects */
+}
+
+/* Ensure the buttons are horizontally aligned with inputs */
+.action-buttons {
+    /*display: flex;*/
+    justify-content: space-between; /* Space between buttons */
+    align-items: center; /* Vertically align buttons and inputs */
+    gap: 5px; /* Space between buttons */
+    height: 100%; /* Ensure it takes full height of the table cell */
+}
+
+/* Reduce button size and override Bootstrap styles */
+.action-buttons .btn {
+    padding: 3px 6px !important;  /* Smaller padding for a compact look */
+    font-size: 12px !important;   /* Smaller font size for icons */
+    display: inline-flex;
+    align-items: center; /* Vertically center content within buttons */
+    justify-content: center; /* Center content within buttons */
+}
+
+.small-text {
+    font-size: 12px; /* Reduce text size for entire section */
+}
+
+.form-check-label {
+    font-size: 12px;
+}
+
+input, button, label, h5 {
+    font-size: 12px; /* Adjust this size as per your need */
+}
+
+/* Group background colors */
+.group-1 {
+    background-color: #f9f9f9;
+}
+
+.group-2 {
+    background-color: #e9e9e9;
+}
+
+.group-3 {
+    background-color: #d9d9d9;
+}
+
+.group-4 {
+    background-color: #c9c9c9;
+}
+
+.group-5 {
+    background-color: #b9b9b9;
+}
+
+/* Style for the collapse/expand button */
+.collapse-btn {
+    margin-right: 5px;
+    padding: 0;
+    font-size: 14px;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+.collapse-btn:focus {
+    outline: none;
+}
+
+
+
+
+        
+    </style>
+</head>
+<body>
+    {% include 'targeting_app/navbar.html' %}
+
+    <div class="container mt-4">
+        <h3>Data - Land Suitability</h3>
+        <div class="row">
+            <div class="col-md-4">
+                <div id="fileList"></div>
+            </div>
+            <div class="col-md-8">
+                <!-- Selected Data Table -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Selected Data:</h5>
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-sm" id="rasterTable">
+                                <thead>
+                                    <tr>
+                                        <th>Group</th>
+                                        <th>Layer</th>
+                                        <th>Min Value</th>
+                                        <th>Optimal From</th>
+                                        <th>Optimal To</th>
+                                        <th>Max Value</th>
+                                        <th>Combine? <span class="tooltip-trigger" data-tooltip="Select 'Yes' to combine this raster with the previous one, forming a group. Select 'No' to start a new group.">
+                                            <i class="fas fa-info-circle ml-1 text-info"></i>
+                                          </span></th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rasterTableBody">
+                                    <!-- Rows will be dynamically added -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Area of Interest (AOI) -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Area of Interest (AOI)</h5>
+                        <div class="form-check-group d-flex">
+                            <div class="form-check mr-3">
+                                <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionMap" value="map" checked>
+                                <label class="form-check-label" for="aoiOptionMap">Draw on the Map</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionFile" value="file">
+                                <label class="form-check-label" for="aoiOptionFile">Upload File (GeoJSON)</label>
+                            </div>
+                        </div>
+                        <div id="mapSection" class="mt-3">
+                            <div id="map-container"></div>
+                        </div>
+                        <div id="fileUploadSection" class="mt-3" style="display: none;">
+                            <label for="aoiFileUpload">Upload GeoJSON file:</label>
+                            <input type="file" id="aoiFileUpload" accept=".geojson">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Form Submission -->
+                <div class="card">
+                    <div class="card-body">
+                        <form id="selectedFilesForm" method="POST" action="/api/processLandSuitability">
+                            {% csrf_token %}
+                            <input type="hidden" id="aoiInput" name="aoi" value="">
+                            <div class="form-group">
+                                <label for="description">
+                                    Description: <span style="color: red;">*</span>
+                                </label>
+                                <input type="text"  id="description" name="description" class="form-control"
+                                       placeholder="Enter a brief title of your analysis" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm" id="submitBtn"><i class="fas fa-play"></i> Run Analysis</button>
+                        </form>
+                        <div id="resultSection" class="mt-3" style="display: none;">
+                            <h4>Processing Complete</h4>
+                            <a id="downloadLink" href="#" class="btn btn-success btn-sm" download><i class="fas fa-download"></i> Download Result</a>
+                            <button id="viewResultBtn" class="btn btn-info btn-sm"><i class="fas fa-map"></i> View Map</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include 'targeting_app/footer.html' %}
+
+    <!-- Modals -->
+    {% include 'targeting_app/modals.html' %}
+
+    <!-- Scripts -->
+
+
+    <script src="{% static 'targeting_app/js/jquery-3.5.1.min.js' %}"></script>
+    <!--<script src="{% static 'targeting_app/js/popper.min.js' %}"></script>-->
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script src="{% static 'targeting_app/vendor/bootstrap/js/bootstrap.min.js' %}"></script>
+    
+    <script src="{% static 'targeting_app/js/leaflet.js' %}"></script>
+    <script src="{% static 'targeting_app/js/leaflet.draw.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/rainbowvis.js' %}"></script>
+
+  
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
+    <script src="{% static 'targeting_app/js/app.js' %}"></script>
+
+   
+  
+    
+
+  
+
+</body>
+</html>
