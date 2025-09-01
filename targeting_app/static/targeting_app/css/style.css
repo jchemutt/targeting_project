@@ -1,0 +1,155 @@
+
+
+/*--------------------------------------------------------------
+# About Section
+--------------------------------------------------------------*/
+#about {
+  padding: 60px 0;
+  background: #eff5f5;
+}
+
+#about .content h3 {
+  color: #555;
+  font-weight: 400;
+  font-size: 22px;
+  line-height: 28px;
+  font-style: italic;
+}
+
+#about .content p {
+  font-size: 16px;
+  line-height: 26px;
+  color: #333;
+}
+
+#about .content i {
+  font-size: 22px;
+  color: #1dc8cd;
+  padding-right: 6px;
+}
+
+/*--------------------------------------------------------------
+# Tools Features Section
+--------------------------------------------------------------*/
+#features {
+  background: #fff;
+  padding: 60px 0;
+}
+
+#features .box {
+  text-align: center;
+  padding: 20px;
+  border-radius: 8px;
+  transition: 0.3s;
+}
+
+#features .box:hover {
+  background: #f8f9fa;
+}
+
+#features .icon {
+  margin-bottom: 15px;
+}
+
+#features .icon img {
+  width: 60px;
+  height: 60px;
+}
+
+#features .title {
+  font-weight: 500;
+  font-size: 20px;
+  color: #333;
+}
+
+#features .description {
+  font-size: 16px;
+  line-height: 24px;
+  color: #555;
+}
+
+/*--------------------------------------------------------------
+# Get Tools Section
+--------------------------------------------------------------*/
+#gettools {
+  background: #eff5f5;
+  padding: 60px 0;
+}
+
+#gettools .box {
+  padding: 40px;
+  box-shadow: 0px 0px 30px rgba(73, 78, 92, 0.15);
+  background: #fff;
+  text-align: center;
+  border-radius: 8px;
+}
+
+#gettools .get-started-btn {
+  background: #1dc8cd;
+  padding: 12px 30px;
+  border-radius: 25px;
+  color: #fff;
+  font-size: 16px;
+  transition: 0.3s;
+}
+
+#gettools .get-started-btn:hover {
+  background: #55fabe;
+}
+
+/*--------------------------------------------------------------
+# Contact Section
+--------------------------------------------------------------*/
+#contact {
+  padding: 60px 0;
+  background: #fff;
+}
+
+#contact .contact-about h3 {
+  font-size: 32px;
+  font-weight: 300;
+  text-transform: uppercase;
+  color: #1dc8cd;
+}
+
+#contact .contact-about p {
+  font-size: 16px;
+  line-height: 24px;
+  color: #666;
+}
+
+#contact .info {
+  color: #333;
+}
+
+#contact .info i {
+  font-size: 28px;
+  color: #1dc8cd;
+  margin-right: 10px;
+}
+
+#contact .info p {
+  font-size: 14px;
+  line-height: 24px;
+}
+
+/*--------------------------------------------------------------
+# Footer
+--------------------------------------------------------------*/
+#footer {
+  background: #fff;
+  padding: 30px 0;
+  color: #333;
+  font-size: 14px;
+  text-align: center;
+}
+
+#footer .footer-links a {
+  color: #666;
+  padding-left: 10px;
+  transition: 0.3s;
+}
+
+#footer .footer-links a:hover {
+  color: #1dc8cd;
+}

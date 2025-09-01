@@ -22,9 +22,6 @@ data/
 staticfiles/
 static_root/
 
-# If using Django's default `collectstatic`
-static/
-
 # Local settings
 *.local.py
 local_settings.py
