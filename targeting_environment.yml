@@ -15,6 +15,5 @@ dependencies:
   - rasterstats
   - psycopg2
   - gunicorn
+  - dbfread
   - pip
-  - pip:
-      - dbfread
