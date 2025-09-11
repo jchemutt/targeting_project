@@ -29,11 +29,11 @@ data = json.load(f)
 SECRET_KEY = data["SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = data.get("DEBUG", False)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
 
-ALLOWED_HOSTS = data["ALLOWED_HOSTS"]
-CSRF_TRUSTED_ORIGINS = data["CSRF_TRUSTED_ORIGINS"]
+ALLOWED_HOSTS = data.get("ALLOWED_HOSTS", [])
+CSRF_TRUSTED_ORIGINS = data.get("CSRF_TRUSTED_ORIGINS", [])
 
 
 # Application definition

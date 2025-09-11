@@ -11,15 +11,15 @@ from dbfread import DBF
 import geopandas as gpd
 import csv
 import re
-from osgeo import gdal
+#from osgeo import gdal
 from django.utils.timezone import now
 from pathlib import Path
 
 from .similarity_analysis3 import similarity_analysis
 
 # Ensure GDAL_DATA is set correctly
-os.environ['GDAL_DATA'] = os.environ['CONDA_PREFIX'] + r'\Library\share\gdal'
-print(f"GDAL_DATA is set to: {os.environ.get('GDAL_DATA')}")
+#os.environ['GDAL_DATA'] = os.environ['CONDA_PREFIX'] + r'\Library\share\gdal'
+#print(f"GDAL_DATA is set to: {os.environ.get('GDAL_DATA')}")
 
 class LandSimilarity:
     def __init__(self, parameters,session):
