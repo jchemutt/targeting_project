@@ -93,12 +93,14 @@ class LandSimilarity:
                             row, col = src.index(point.x, point.y)
                             sample_value = src.read(1)[row, col]
                             sampled_data.append(sample_value)
-                            sampled_points.append(point)
+                            sampled_points.append(point)  # geometry for this sample
                         except IndexError:
                             print(f"Point {point} is outside raster bounds.")
                             sampled_data.append(np.nan)
+                            sampled_points.append(point)  # <-- add this line
             except Exception as e:
                 print(f"Error processing raster {raster_path}: {e}")
+
 
         # Save sampled data to shapefile if samples exist
         if sampled_data:

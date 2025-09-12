@@ -14,6 +14,9 @@ from django.views.decorators.csrf import csrf_exempt
 from .land_suitability2 import LandSuitability
 from .land_similarity2 import LandSimilarity
 from .land_statistics2 import LandStatistics
+from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_protect
+from django.contrib.auth.decorators import user_passes_test
 
 def landing_page(request):
     return render(request, 'targeting_app/landing_page.html')
@@ -144,7 +147,8 @@ def convert_aoi_to_geojson(aoi_str):
         raise ValueError(f"Invalid AOI format: {e}")
 
 
-@csrf_exempt
+@require_POST
+@csrf_protect
 def process_land_suitability(request):
     if request.method == 'POST':
         try:
@@ -252,6 +256,9 @@ def get_user_files(request):
     files = request.session.get("generated_files", [])
     return JsonResponse(files, safe=False)
 
+
+
+@user_passes_test(lambda u: u.is_superuser)
 def manage_session(request, action):
     if action == "flush":
         request.session.flush()
@@ -265,7 +272,8 @@ def manage_session(request, action):
         return JsonResponse({"message": f"Session key '{key}' cleared (if it existed)."})
     return JsonResponse({"message": "Invalid action!"})
 
-@csrf_exempt
+@require_POST
+@csrf_protect
 def process_land_similarity(request):
     if request.method == 'POST':
         try:
@@ -380,7 +388,8 @@ def process_land_statistics(request):
     print(f"Invalid request method: {request.method}")
     return JsonResponse({'status': 'error', 'message': f'Invalid request method: {request.method}'}, status=405)
 '''
-@csrf_exempt
+@require_POST
+@csrf_protect
 def process_statistics(request):
     """
     Handle the processing of land statistics by accepting boundary GeoJSON, raster file path,

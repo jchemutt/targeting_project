@@ -72,10 +72,10 @@
     </style>
 </head>
 <body>
+    {% csrf_token %}
     {% include 'targeting_app/navbar.html' %}
     <div class="container mt-4">
         <h3>My Processed Files</h3>
-        <input type="hidden" id="csrf-token" value="{% csrf_token %}">
         <div class="row">
             <div class="col-md-6">
                 <div class="table-responsive">
@@ -472,7 +472,7 @@ function getSelectedStatistics() {
             return;
             }
 
-            const csrfToken = document.getElementById('csrf-token').value;
+            const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
             $('#processingModal').modal('show');
 
            try{
