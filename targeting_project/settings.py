@@ -30,6 +30,7 @@ SECRET_KEY = data["SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = data.get("DEBUG", False)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
 
 ALLOWED_HOSTS = data.get("ALLOWED_HOSTS", [])
