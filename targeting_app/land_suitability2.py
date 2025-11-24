@@ -16,6 +16,7 @@ from django.utils.timezone import now
 from .reclassify import reclassify
 from .main_tool import TargetingTool
 from pathlib import Path
+import shutil
 
 # Configure logging
 logging.basicConfig(
@@ -510,6 +511,7 @@ class LandSuitability(TargetingTool):
             logging.error("Reclassification failed: %s", e, exc_info=True)
             raise
 
+        self.cleanup_intermediate_files(ras_temp_path, output_reclassified_path)
         # Compute relative path for the output
         media_dir = os.path.join(os.getcwd(), "media")
         relative_output_path = os.path.relpath(output_reclassified_path, media_dir)
@@ -610,6 +612,33 @@ class LandSuitability(TargetingTool):
                 logging.warning("AOI does not overlap with raster: %s", raster_path)
                 return False
         return True
+    
+    def cleanup_intermediate_files(self, ras_temp_path, final_file_path):
+        """
+        Delete all files in ras_temp_path except the final product.
+
+        Parameters:
+            ras_temp_path (str): The temporary directory path.
+            final_file_path (str): Absolute path of the file to keep.
+        """
+        final_file_path = os.path.abspath(final_file_path)
+
+        for name in os.listdir(ras_temp_path):
+            path = os.path.join(ras_temp_path, name)
+            try:
+                if os.path.abspath(path) == final_file_path:
+                    # Skip the final product
+                    continue
+
+                if os.path.isfile(path) or os.path.islink(path):
+                    os.remove(path)
+                    logging.debug("Deleted intermediate file: %s", path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path)
+                    logging.debug("Deleted intermediate directory: %s", path)
+            except Exception as e:
+                logging.warning("Could not delete %s: %s", path, e)
+    
     
     def store_metadata_in_session(self, file_metadata):
         """

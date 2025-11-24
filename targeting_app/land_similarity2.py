@@ -11,6 +11,7 @@ from dbfread import DBF
 import geopandas as gpd
 import csv
 import re
+import shutil
 #from osgeo import gdal
 from django.utils.timezone import now
 from pathlib import Path
@@ -224,7 +225,7 @@ class LandSimilarity:
                     "title":self.parameters.get('description')+" MESS",
                 })
 
-
+            self.cleanup_intermediate_files(keep_files=[mnobis_file, mess_file])
             return {
                 "Mahalanobis": result_relative_mnobis_ras_url,
                 "MESS": result_relative_mess_ras_url
@@ -232,7 +233,41 @@ class LandSimilarity:
         except Exception as e:
             print(f"Error during execution: {e}")
             return None
+        
+    def cleanup_intermediate_files(self, keep_files=None):
+        """
+        Delete all files in self.ras_temp_path except those explicitly listed in keep_files.
 
+        Parameters:
+            keep_files (list[str]): List of absolute file paths that should be preserved.
+        """
+        if keep_files is None:
+            keep_files = []
+
+        keep_set = {os.path.abspath(p) for p in keep_files if p}
+        base_dir = os.path.abspath(self.ras_temp_path)
+
+        for root, dirs, files in os.walk(base_dir):
+            for fname in files:
+                fpath = os.path.abspath(os.path.join(root, fname))
+                if fpath in keep_set:
+                    continue
+                try:
+                    os.remove(fpath)
+                    print(f"Deleted intermediate file: {fpath}")
+                except Exception as e:
+                    print(f"Could not delete {fpath}: {e}")
+
+        # Optional: remove empty subdirs (but keep main ras_temp_path directory)
+        for root, dirs, _ in os.walk(base_dir, topdown=False):
+            for d in dirs:
+                dpath = os.path.join(root, d)
+                try:
+                    if not os.listdir(dpath):
+                        os.rmdir(dpath)
+                        print(f"Removed empty directory: {dpath}")
+                except Exception as e:
+                    print(f"Could not remove directory {dpath}: {e}")
 
 """
 # Sample parameters
