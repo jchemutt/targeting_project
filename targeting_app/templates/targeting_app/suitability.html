@@ -31,6 +31,9 @@
     vertical-align: middle;  /* Align icon with text */
 }
 
+#aoiStatus { font-size: 12px; }
+#clearAoiBtn { white-space: nowrap; }
+
 /* Style the folder name text */
 .folder {
     font-size: 14px;  /* Reduce the text size */
@@ -259,28 +262,61 @@ input, button, label, h5 {
                 </div>
 
                 <!-- Area of Interest (AOI) -->
-                <div class="card mb-4">
-                    <div class="card-body">
-                        <h5 class="card-title">Area of Interest (AOI)</h5>
-                        <div class="form-check-group d-flex">
-                            <div class="form-check mr-3">
-                                <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionMap" value="map" checked>
-                                <label class="form-check-label" for="aoiOptionMap">Draw on the Map</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionFile" value="file">
-                                <label class="form-check-label" for="aoiOptionFile">Upload File (GeoJSON)</label>
-                            </div>
-                        </div>
-                        <div id="mapSection" class="mt-3">
-                            <div id="map-container"></div>
-                        </div>
-                        <div id="fileUploadSection" class="mt-3" style="display: none;">
-                            <label for="aoiFileUpload">Upload GeoJSON file:</label>
-                            <input type="file" id="aoiFileUpload" accept=".geojson">
+<!-- ================= AOI CARD ================= -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Area of Interest (AOI)</h5>
+
+                    <!-- AOI selection -->
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio"
+                               name="aoiOption" id="aoiOptionMap" value="map" checked>
+                        <label class="form-check-label" for="aoiOptionMap">
+                            Draw on map
+                        </label>
+                    </div>
+
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio"
+                               name="aoiOption" id="aoiOptionFile" value="file">
+                        <label class="form-check-label" for="aoiOptionFile">
+                            Upload file
+                        </label>
+                    </div>
+
+                    <!-- MAP (ALWAYS PRESENT) -->
+                    <div class="mt-3">
+                        <div id="map-container"></div>
+
+                        <div class="d-flex align-items-center mt-2">
+                            <small id="aoiStatus" class="text-muted aoi-status flex-grow-1">
+                                No AOI selected. Draw on the map or upload a file.
+                            </small>
+                            <button type="button" id="clearAoiBtn"
+                                    class="btn btn-outline-secondary btn-sm ml-2">
+                                Clear AOI
+                            </button>
                         </div>
                     </div>
+
+                    <!-- FILE UPLOAD -->
+                    <div id="fileUploadSection" class="mt-3" style="display:none;">
+                        <label for="aoiFileUpload">
+                            Upload AOI (GeoJSON / KML / Shapefile ZIP)
+                        </label>
+                        <input type="file"
+                               id="aoiFileUpload"
+                               class="form-control-file"
+                               accept=".geojson,.json,.kml,.zip">
+
+                        <small class="text-muted d-block mt-1">
+                            Shapefile must be a single <b>.zip</b> with
+                            .shp, .shx, .dbf (+ .prj recommended).
+                        </small>
+                    </div>
+
                 </div>
+            </div>
 
                 <!-- Form Submission -->
                 <div class="card">
@@ -330,6 +366,9 @@ input, button, label, h5 {
   
     <script src="https://unpkg.com/@popperjs/core@2"></script>
     <script src="https://unpkg.com/tippy.js@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
+    <script src="https://unpkg.com/@tmcw/togeojson@5.8.0/dist/togeojson.umd.js"></script>
     <script src="{% static 'targeting_app/js/app.js' %}"></script>
 
    

@@ -8,6 +8,7 @@ import rasterio.mask
 import threading
 from shapely.geometry import  shape, Polygon,MultiPolygon, box
 from collections import OrderedDict
+from shapely.ops import transform as shapely_transform
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pyproj import Transformer
@@ -223,13 +224,13 @@ class LandSuitability(TargetingTool):
             for group in ras_temp_file:
                 if len(group) == 1:
                     raster_path = group[0]
-                    with rasterio.open(raster_path,masked=True) as src:
+                    with rasterio.open(raster_path) as src:
                         if reference_meta is None:
                             # Set the metadata of the first raster as reference
                             reference_meta = src.meta.copy()
                             logging.debug("Reference metadata set: %s", reference_meta)
 
-                        data = src.read(1)  # Read as numpy array
+                        data = src.read(1,masked=True)  # Read as numpy array
                         masked_data = np.ma.masked_equal(data, NO_DATA_VALUE)  # Mask out NoData values
 
                         if combined_data is None:
@@ -242,7 +243,7 @@ class LandSuitability(TargetingTool):
                     for raster_path in group:
                         # Ensure `reference_meta` is set before resampling
                         if reference_meta is None:
-                            with rasterio.open(raster_path,masked=True) as src:
+                            with rasterio.open(raster_path) as src:
                                 reference_meta = src.meta.copy()
                                 logging.debug("Reference metadata set: %s", reference_meta)
 
@@ -306,7 +307,7 @@ class LandSuitability(TargetingTool):
             FILTERED_OUT_VALUE = -9999  # Filtered-out value for out-of-threshold pixels
 
             # Open raster with masked values
-            with rasterio.open(raster_path, masked=True) as src:
+            with rasterio.open(raster_path) as src:
                 logging.debug("Raster opened: %s", raster_path)
                 transform = src.transform
                 crs = src.crs
@@ -330,8 +331,10 @@ class LandSuitability(TargetingTool):
                     # Apply AOI masking
                     try:
                         aoi_polygon = [aoi_transformed.__geo_interface__]
-                        data, transform = rasterio.mask.mask(src, aoi_polygon, crop=True)
+                        data, transform = rasterio.mask.mask(src, aoi_polygon, crop=True,filled=False)
                         data = data[0]  # Extract single-band data
+                        data = data.astype(np.float32)
+                        data = np.ma.masked_equal(data, no_data_value)
                     except ValueError as e:
                         logging.error("Masking failed for raster %s: %s", raster_path, e)
                         return 0
@@ -356,7 +359,7 @@ class LandSuitability(TargetingTool):
                         })
 
                         with rasterio.open(ref_raster, "w", **meta) as ref_dst:
-                            ref_dst.write(data.filled(NO_DATA_VALUE), 1)
+                            ref_dst.write(data.astype(np.float32).filled(NO_DATA_VALUE), 1)
                         logging.debug("Reference raster created successfully.")
 
             # Wait until reference raster exists before continuing
@@ -412,7 +415,7 @@ class LandSuitability(TargetingTool):
             })
 
             with rasterio.open(output_path, "w", **meta) as dst:
-                dst.write(normalized.filled(NO_DATA_VALUE), 1)  # Preserve NoData
+                dst.write(normalized.astype(np.float32).filled(NO_DATA_VALUE), 1)  # Preserve NoData
             logging.info("Processed raster saved: %s", output_path)
 
             return 1
@@ -490,7 +493,7 @@ class LandSuitability(TargetingTool):
             raise ValueError("Combined raster is None. Cannot save output.")
 
         ref_raster_path = os.path.join(ras_temp_path, "normalized_0.tif")
-        with rasterio.open(ref_raster_path,masked=True) as ref_raster:
+        with rasterio.open(ref_raster_path) as ref_raster:
             meta = ref_raster.meta
             meta.update({
                 "driver": "GTiff",
@@ -550,23 +553,20 @@ class LandSuitability(TargetingTool):
         """
         Transform AOI coordinates to match the raster's CRS.
 
-        Parameters:
-            aoi (shapely.geometry.Polygon or MultiPolygon): AOI geometry in lat/lon (EPSG:4326).
-            raster_crs (CRS): Target CRS of the raster.
-
-        Returns:
-            shapely.geometry.Polygon: AOI transformed to the raster's CRS.
+        aoi: shapely Polygon or MultiPolygon in EPSG:4326
+        raster_crs: rasterio CRS (or object with .to_string())
         """
         if not isinstance(aoi, (Polygon, MultiPolygon)):
             raise TypeError("AOI must be a shapely Polygon or MultiPolygon.")
 
-        transformer = Transformer.from_crs("EPSG:4326", raster_crs.to_string(), always_xy=True)
+        transformer = Transformer.from_crs(
+            "EPSG:4326",
+            raster_crs.to_string() if hasattr(raster_crs, "to_string") else raster_crs,
+            always_xy=True
+        )
 
-        # Transform coordinates
-        transformed_coords = [
-            transformer.transform(x, y) for x, y in aoi.exterior.coords
-        ]
-        return Polygon(transformed_coords)
+        # shapely.ops.transform will transform ALL coords (exterior + interiors, and all parts in MultiPolygon)
+        return shapely_transform(lambda x, y, z=None: transformer.transform(x, y), aoi)
 
     def get_extent_from_aoi(self, aoi_input):
         """

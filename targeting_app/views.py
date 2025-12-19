@@ -146,108 +146,167 @@ def convert_aoi_to_geojson(aoi_str):
     except Exception as e:
         raise ValueError(f"Invalid AOI format: {e}")
 
+def normalize_aoi_to_geometry(aoi):
+    """
+    Normalize AOI input (dict or JSON string) into a GeoJSON geometry dict.
+    Supports: Feature, FeatureCollection, Polygon, MultiPolygon.
+    """
+    aoi_data = json.loads(aoi) if isinstance(aoi, str) else aoi
+
+    if not isinstance(aoi_data, dict) or "type" not in aoi_data:
+        raise ValueError("Invalid AOI GeoJSON: missing 'type'.")
+
+    t = aoi_data["type"]
+
+    # Feature -> geometry
+    if t == "Feature":
+        geom = aoi_data.get("geometry")
+        if not geom:
+            raise ValueError("GeoJSON Feature is missing 'geometry'.")
+        return geom
+
+    # FeatureCollection -> use first feature geometry
+    if t == "FeatureCollection":
+        feats = aoi_data.get("features", [])
+        if not feats:
+            raise ValueError("GeoJSON FeatureCollection has no features.")
+        geom = feats[0].get("geometry")
+        if not geom:
+            raise ValueError("First feature in FeatureCollection has no geometry.")
+        return geom
+
+    # Already a geometry
+    if t in ("Polygon", "MultiPolygon"):
+        return aoi_data
+
+    raise ValueError(f"Unsupported AOI type: {t}. Expected Feature/FeatureCollection/Polygon/MultiPolygon.")
+
 
 @require_POST
 @csrf_protect
 def process_land_suitability(request):
-    if request.method == 'POST':
-        try:
-            # Parse the form data
-            form_data = json.loads(request.body)
+    if request.method != "POST":
+        return HttpResponse(status=405)
 
-            # Get AOI and other inputs
-            aoi = form_data.get('aoi', None)  # AOI is optional
-            selected_files = form_data.get('selectedFiles', [])
-            raster_parameters = form_data.get('rasterParameters', {})
-            description = form_data.get('description', '').strip()
-            if not description:
-                return JsonResponse({'status': 'error', 'message': 'Description is required.'}, status=400)
+    try:
+        form_data = json.loads(request.body)
 
-            # Initialize parameters
-            parameters = {'description': description}
-          
+        aoi = form_data.get("aoi", None)  # optional
+        selected_files = form_data.get("selectedFiles", [])
+        raster_parameters = form_data.get("rasterParameters", {})
+        description = (form_data.get("description", "") or "").strip()
 
-            # Handle AOI (Polygon, Rectangle, or GeoJSON)
-            if aoi:
+        if not description:
+            return JsonResponse(
+                {"status": "error", "message": "Description is required."},
+                status=400
+            )
+
+        # Initialize parameters
+        parameters = {"description": description}
+
+        # -------------------------
+        # AOI handling
+        # -------------------------
+        if aoi:
+            # Case 1: AOI is dict already (GeoJSON)
+            if isinstance(aoi, dict):
+                geometry = normalize_aoi_to_geometry(aoi)
+
+            # Case 2: AOI is string
+            elif isinstance(aoi, str):
+                aoi_str = aoi.strip()
+
+                # Try GeoJSON JSON string first
                 try:
-                    # Attempt to parse AOI as GeoJSON
-                    aoi_data = json.loads(aoi) if isinstance(aoi, str) else aoi
-                    if "type" in aoi_data:
-                        if aoi_data["type"] == "Feature" and "geometry" in aoi_data:
-                            # Extract geometry from Feature
-                            geometry = aoi_data["geometry"]
-                        elif aoi_data["type"] in ["Polygon", "MultiPolygon"]:
-                            # Directly use the geometry
-                            geometry = aoi_data
-                        else:
-                            raise ValueError("Unsupported AOI type.")
-
-                        parameters['out_extent'] = geometry  # Add GeoJSON geometry
-                        print(f"AOI processed as GeoJSON: {parameters['out_extent']}")
-                    else:
-                        raise ValueError("Invalid GeoJSON format.")
+                    geometry = normalize_aoi_to_geometry(aoi_str)
                 except json.JSONDecodeError:
-                    if ";" in aoi:
-                        # Handle semicolon-separated polygon AOI
-                        geojson_aoi = convert_aoi_to_geojson(aoi)
-                        parameters['out_extent'] = geojson_aoi
-                        print(f"AOI provided as polygon string converted to GeoJSON: {geojson_aoi}")
-                    elif "," in aoi:
-                        # Handle rectangle AOI as bounding box
-                        coords = aoi.split(",")
-                        if len(coords) == 4:
-                            parameters['out_extent'] = {
-                                "type": "Polygon",
-                                "coordinates": [[
-                                    [float(coords[1]), float(coords[0])],
-                                    [float(coords[3]), float(coords[0])],
-                                    [float(coords[3]), float(coords[2])],
-                                    [float(coords[1]), float(coords[2])],
-                                    [float(coords[1]), float(coords[0])]
-                                ]]
-                            }
-                            print(f"AOI provided as rectangle converted to GeoJSON: {parameters['out_extent']}")
-                        else:
-                            return JsonResponse({'status': 'error', 'message': 'Invalid AOI format.'}, status=400)
+                    # Not JSON -> try your custom formats
+                    if ";" in aoi_str:
+                        # semicolon polygon string -> convert
+                        geometry = convert_aoi_to_geojson(aoi_str)
+                    elif "," in aoi_str:
+                        # bbox string "minLat,minLon,maxLat,maxLon" (your current interpretation)
+                        coords = [c.strip() for c in aoi_str.split(",")]
+                        if len(coords) != 4:
+                            return JsonResponse(
+                                {"status": "error", "message": "Invalid AOI bbox format. Expected 4 comma-separated values."},
+                                status=400
+                            )
+                        min_lat, min_lon, max_lat, max_lon = map(float, coords)
+                        geometry = {
+                            "type": "Polygon",
+                            "coordinates": [[
+                                [min_lon, min_lat],
+                                [max_lon, min_lat],
+                                [max_lon, max_lat],
+                                [min_lon, max_lat],
+                                [min_lon, min_lat],
+                            ]]
+                        }
                     else:
-                        return JsonResponse({'status': 'error', 'message': 'Invalid AOI format.'}, status=400)
+                        return JsonResponse(
+                            {"status": "error", "message": "Invalid AOI format."},
+                            status=400
+                        )
             else:
-                print("AOI not provided. Proceeding without spatial extent filter.")
+                return JsonResponse(
+                    {"status": "error", "message": "Unsupported AOI input type."},
+                    status=400
+                )
 
-            # Validate selected raster files
-            if not selected_files:
-                return JsonResponse({'status': 'error', 'message': 'No raster files selected.'}, status=400)
+            # Ensure AOI geometry is polygonal
+            if not isinstance(geometry, dict) or geometry.get("type") not in ("Polygon", "MultiPolygon"):
+                return JsonResponse(
+                    {"status": "error", "message": f"Unsupported AOI geometry: {geometry.get('type')}. Only Polygon/MultiPolygon are supported."},
+                    status=400
+                )
 
-            # Process raster parameters for each file
-            for i, file_path in enumerate(selected_files):
-                if file_path not in raster_parameters:
-                    return JsonResponse({'status': 'error', 'message': f'Missing parameters for raster {file_path}.'}, status=400)
+            parameters["out_extent"] = geometry
+            print("AOI processed as GeoJSON geometry:", parameters["out_extent"])
 
-                # Populate parameters dictionary for each raster
-                parameters[f"in_raster_{i + 1}"] = 'data' + file_path
-                parameters[f"min_val_{i + 1}"] = raster_parameters[file_path]['min_val']
-                parameters[f"opti_from_{i + 1}"] = raster_parameters[file_path]['opti_from']
-                parameters[f"opti_to_{i + 1}"] = raster_parameters[file_path]['opti_to']
-                parameters[f"max_val_{i + 1}"] = raster_parameters[file_path]['max_val']
-                parameters[f"combine_{i + 1}"] = raster_parameters[file_path]['combine']
+        else:
+            print("AOI not provided. Proceeding without spatial extent filter.")
 
-            print("Processed Parameters:", json.dumps(parameters, indent=4))
-            #return JsonResponse({'status': 'success', 'result_url': parameters})
-            suitability_tool = LandSuitability(parameters,request.session)
-            result_relative_url = suitability_tool.execute()
+        # -------------------------
+        # Validate selected rasters
+        # -------------------------
+        if not selected_files:
+            return JsonResponse(
+                {"status": "error", "message": "No raster files selected."},
+                status=400
+            )
 
-            # Construct the complete URL for the output file
-            result_absolute_url = request.build_absolute_uri(result_relative_url)
+        # -------------------------
+        # Collect raster params
+        # -------------------------
+        for i, file_path in enumerate(selected_files):
+            if file_path not in raster_parameters:
+                return JsonResponse(
+                    {"status": "error", "message": f"Missing parameters for raster {file_path}."},
+                    status=400
+                )
 
-            # Send the email with the absolute URL
-            #suitability_tool.submit_message(result_absolute_url, parameters['emails'], suitability_tool.label)
+            rp = raster_parameters[file_path]
 
-            return JsonResponse({'status': 'success', 'result_url': result_absolute_url})
+            parameters[f"in_raster_{i + 1}"] = "data" + file_path
+            parameters[f"min_val_{i + 1}"] = rp["min_val"]
+            parameters[f"opti_from_{i + 1}"] = rp["opti_from"]
+            parameters[f"opti_to_{i + 1}"] = rp["opti_to"]
+            parameters[f"max_val_{i + 1}"] = rp["max_val"]
+            parameters[f"combine_{i + 1}"] = rp["combine"]
 
-        except Exception as e:
-            return JsonResponse({'status': 'error', 'message': str(e)})
+        print("Processed Parameters:", json.dumps(parameters, indent=4))
 
-    return HttpResponse(status=405)
+        # Run tool
+        suitability_tool = LandSuitability(parameters, request.session)
+        result_relative_url = suitability_tool.execute()
+        result_absolute_url = request.build_absolute_uri(result_relative_url)
+
+        return JsonResponse({"status": "success", "result_url": result_absolute_url})
+
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=500)
 
 def get_user_files(request):
     """
