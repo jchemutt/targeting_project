@@ -219,15 +219,137 @@
         "min_val": 1,
         "max_val": 3
     },
-    {"name": "ghana_livestock_density.tif", "min_val": 0, "max_val": 82.82711791992188},
-    {"name": "ghana_mean_annual_rainfall_(mm).tif", "min_val": 778.2959594726562, "max_val": 2277.20068359375},
-    {"name": "ghana_mean_annual_temperature.tif", "min_val": "nan", "max_val": "nan"},
-    {"name": "ghana_proximity_to_rivers_(m).tif", "min_val": 0, "max_val": 62427.37109375},
-    {"name": "ghana_proximity_to_roads_(m).tif", "min_val": 0, "max_val": 82806.1796875},
-    {"name": "ghana_slope_in_percentage.tif", "min_val": 0, "max_val": 370.1253967285156},
-    {"name": "ghana_soil_nitrogen_(g_kg).tif", "min_val": 0.27300000190734863, "max_val": 4.539999961853027},
-    {"name": "ghana_soil_organic_carbon_30cm.tif", "min_val": 1.6666666269302368, "max_val": 102.33333587646484},
-    {"name": "ghana_soil_ph.tif", "min_val": 3.9000000953674316, "max_val": 7.5},
+    {
+        "name": "ghana_Clitoria_ternatea_forage_suitability.tif",
+        "min_val": 0.12286486476659775,
+        "max_val": 0.9917207956314087
+    },
+    {
+        "name": "ghana_croplands.tif",
+        "min_val": 0,
+        "max_val": 1
+    },
+    {
+        "name": "ghana_Crotalaria_juncea_forage_suitability.tif",
+        "min_val": 0.06714197993278503,
+        "max_val": 0.9519788026809692
+    },
+    {
+        "name": "ghana_female_population_density_(above15years)_per_sqkm.tif",
+        "min_val": 0.9864637851715088,
+        "max_val": 8119.5869140625
+    },
+    {
+        "name": "ghana_Lablab_purpureus_forage_suitability.tif",
+        "min_val": 0.05339273437857628,
+        "max_val": 0.9826406836509705
+    },
+    {
+        "name": "ghana_land_productivity_dynamics.tif",
+        "min_val": 0,
+        "max_val": 5
+    },
+    {
+        "name": "ghana_livestock_density.tif",
+        "min_val": 0,
+        "max_val": 82.82711791992188
+    },
+    {
+        "name": "ghana_mean_annual_rainfall_(mm).tif",
+        "min_val": 778.2959594726562,
+        "max_val": 2277.20068359375
+    },
+    {
+        "name": "ghana_mean_annual_temperature.tif",
+        "min_val": 24.7348403931,
+        "max_val": 29.1244506836
+    },
+    {
+        "name": "ghana_percentage_tree_cover_loss.tif",
+        "min_val": 0,
+        "max_val": 100
+    },
+    {
+        "name": "ghana_percent_of_people_living_in_multidimensionally_poor_households.tif",
+        "min_val": 6,
+        "max_val": 69
+    },
+    {
+        "name": "ghana_proximity_to_rivers_(m).tif",
+        "min_val": 0,
+        "max_val": 62427.37109375
+    },
+    {
+        "name": "ghana_proximity_to_roads_(m).tif",
+        "min_val": 0,
+        "max_val": 82806.1796875
+    },
+    {
+        "name": "ghana_Pterocarpus_erinaceous_tree_species_suitability.tif",
+        "min_val": 0.009547717869281769,
+        "max_val": 0.8952834010124207
+    },
+    {
+        "name": "ghana_slope_in_percentage.tif",
+        "min_val": 0,
+        "max_val": 370.1253967285156
+    },
+    {
+        "name": "ghana_small_ruminants_density_animal_sqKm.tif",
+        "min_val": 0,
+        "max_val": 846.4010009765625
+    },
+    {
+        "name": "ghana_soil_nitrogen_(g_kg).tif",
+        "min_val": 0.27300000190734863,
+        "max_val": 4.539999961853027
+    },
+    {
+        "name": "ghana_soil_organic_carbon_30cm.tif",
+        "min_val": 1.6666666269302368,
+        "max_val": 102.33333587646484
+    },
+    {
+        "name": "ghana_soil_ph.tif",
+        "min_val": 3.9000000953674316,
+        "max_val": 7.5
+    },
+    {
+        "name": "ghana_travel_time_to_tamale_minutes(by_motor).tif",
+        "min_val": 0.08955514430999756,
+        "max_val": 1018.115478515625
+    },
+    {
+        "name": "ghana_travel_time_to_tamale_minutes(walking).tif",
+        "min_val": 0.8955513834953308,
+        "max_val": 7722.30224609375
+    },
+    {
+        "name": "ghana_travel_time_to_urban_areas_50k_minutes(motor).tif",
+        "min_val": 0,
+        "max_val": 611.3244018554688
+    },
+    {
+        "name": "ghana_travel_time_to_urban_areas_50k_minutes(walking).tif",
+        "min_val": 0,
+        "max_val": 2121.890869140625
+    },
+    {
+        "name": "ghana_Urochloa_brizanta_forage_suitability.tif",
+        "min_val": 0.03912344202399254,
+        "max_val": 0.9874170422554016
+    },
+    {
+        "name": "ghana_Vigna_unguiculata_forage_suitability.tif",
+        "min_val": 0.4775415062904358,
+        "max_val": 0.9453844428062439
+    },
+    {
+        "name": "ghana_Vitellaria_paradoxa_tree_species_suitability.tif",
+        "min_val": 0.0006757448427379131,
+        "max_val": 0.8568242788314819
+    },
+    
     {
         "name": "kenya_annual_evapo_transpiration.tif",
         "min_val": 937,

@@ -32,5 +32,5 @@ def process_raster_files(input_folder, output_json):
 
 if __name__ == "__main__":
     input_folder = 'C:/Users/jchemutt/Documents/projects/Targeting/targeting_project/data'
-    output_json = 'C:/Users/jchemutt/Documents/projects/Targeting/targeting_project/values3.json'
+    output_json = 'C:/Users/jchemutt/Documents/projects/Targeting/targeting_project/values4.json'
     process_raster_files(input_folder, output_json)
