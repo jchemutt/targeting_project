@@ -5,48 +5,49 @@
 ========================= */
 function validateOptiFrom(optiFromInput) {
   const row = optiFromInput.closest("tr");
-  const minValInput = row.querySelector('input[name*="[min_val]"]');
-  const minVal = parseFloat(minValInput.value);
+  const minVal = parseFloat(row.querySelector('input[name*="[min_val]"]').value);
   const optiFrom = parseFloat(optiFromInput.value);
+  const optiToInput = row.querySelector('input[name*="[opti_to]"]');
+  const optiTo = parseFloat(optiToInput.value);
 
-  if (isNaN(optiFrom) || optiFrom <= minVal) {
-    alert(`Optimum From must be greater than Minimum Value (${minVal}).`);
+  // minVal <= optiFrom
+  if (isNaN(optiFrom) || isNaN(minVal) || optiFrom < minVal) {
+    alert(`Optimum From must be >= Minimum Value (${minVal}).`);
     optiFromInput.value = "";
     optiFromInput.focus();
+    return;
   }
-}
 
-function validateMinVal(minValInput, initialMinVal) {
-  const minVal = parseFloat(minValInput.value);
-
-  if (isNaN(minVal) || minVal < initialMinVal) {
-    alert(`Minimum Value must not be less than the initial value (${initialMinVal}).`);
-    minValInput.value = initialMinVal;
-    minValInput.focus();
+  // optiFrom <= optiTo (only if optiTo already filled)
+  if (!isNaN(optiTo) && optiFrom > optiTo) {
+    alert(`Optimum From must be <= Optimum To (${optiTo}).`);
+    optiFromInput.value = "";
+    optiFromInput.focus();
+    return;
   }
 }
 
 function validateOptiTo(optiToInput) {
   const row = optiToInput.closest("tr");
-  const maxValInput = row.querySelector('input[name*="[max_val]"]');
-
+  const maxVal = parseFloat(row.querySelector('input[name*="[max_val]"]').value);
   const optiTo = parseFloat(optiToInput.value);
-  const maxVal = parseFloat(maxValInput.value);
+  const optiFromInput = row.querySelector('input[name*="[opti_from]"]');
+  const optiFrom = parseFloat(optiFromInput.value);
 
-  if (isNaN(optiTo) || optiTo >= maxVal) {
-    alert(`Optimal To value must be less than Maximum Value (${maxVal}).`);
+  // optiTo <= maxVal
+  if (isNaN(optiTo) || isNaN(maxVal) || optiTo > maxVal) {
+    alert(`Optimal To must be <= Maximum Value (${maxVal}).`);
     optiToInput.value = "";
     optiToInput.focus();
+    return;
   }
-}
 
-function validateMaxVal(maxValInput, defaultMaxVal) {
-  const maxVal = parseFloat(maxValInput.value);
-
-  if (isNaN(maxVal) || maxVal > defaultMaxVal) {
-    alert(`Maximum Value must not be greater than ${defaultMaxVal}.`);
-    maxValInput.value = defaultMaxVal;
-    maxValInput.focus();
+  // optiFrom <= optiTo (only if optiFrom already filled)
+  if (!isNaN(optiFrom) && optiFrom > optiTo) {
+    alert(`Optimum To must be >= Optimum From (${optiFrom}).`);
+    optiToInput.value = "";
+    optiToInput.focus();
+    return;
   }
 }
 
@@ -595,11 +596,20 @@ async function updateMapView(folderName) {
         return;
       }
 
-      if (parseFloat(optiFrom) <= parseFloat(minVal) || parseFloat(optiTo) >= parseFloat(maxVal)) {
-        alert("Opti From must be greater than Min Value and Opti To must be less than Max Value.");
+        const minV = parseFloat(minVal);
+        const maxV = parseFloat(maxVal);
+        const of = parseFloat(optiFrom);
+        const ot = parseFloat(optiTo);
+
+        if (of < minV || of > ot || ot > maxV) {
+        alert(
+            `Invalid range for: ${originalFilePath}\n` +
+            `Required: minVal <= optiFrom <= optiTo <= maxVal\n` +
+            `Got: ${minV} <= ${of} <= ${ot} <= ${maxV}`
+        );
         isValid = false;
         return;
-      }
+        }
 
       rasterParameters[originalFilePath] = {
         opti_from: optiFrom,
