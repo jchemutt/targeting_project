@@ -29,7 +29,22 @@ logging.basicConfig(
     ]
 )
 
-
+def wait_for_valid_raster(path, tries=50, sleep=0.1):
+    """
+    Wait until a raster exists AND can be opened by rasterio.
+    Prevents race conditions in threaded workflows.
+    """
+    for _ in range(tries):
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            try:
+                with rasterio.open(path):
+                    return True
+            except Exception:
+                pass
+        time.sleep(sleep)
+    return False
+        
+   
 class LandSuitability(TargetingTool):
     """Tool for determining land suitability based on raster data and user-defined criteria."""
 
@@ -164,7 +179,7 @@ class LandSuitability(TargetingTool):
         logging.info("Processed %d valid rasters.", valid_rasters)
         return valid_rasters
 
-    def align_to_reference(self, data, transform, ref_raster_path):
+    def align_to_reference(self, data, transform, src_crs,ref_raster_path):
         """
         Align the masked raster to the reference raster.
 
@@ -189,13 +204,13 @@ class LandSuitability(TargetingTool):
                 destination=aligned_data,
                 src_transform=transform,
                 dst_transform=ref_transform,
-                src_crs=ref.crs,
+                src_crs=src_crs,
                 dst_crs=ref_crs,
                 resampling=rasterio.warp.Resampling.nearest,
             )
             return aligned_data, ref_transform
         
-   
+
 
     def combine_rasters(self, in_raster, ras_temp_path):
         """
@@ -309,6 +324,7 @@ class LandSuitability(TargetingTool):
             # Open raster with masked values
             with rasterio.open(raster_path) as src:
                 logging.debug("Raster opened: %s", raster_path)
+                src_meta = src.meta.copy()
                 transform = src.transform
                 crs = src.crs
                 data = src.read(1, masked=True)  # Read as a masked array (preserves NoData)
@@ -347,7 +363,7 @@ class LandSuitability(TargetingTool):
                     if not os.path.exists(ref_raster):  # Double-check inside lock
                         logging.debug("Creating reference raster: %s", ref_raster)
 
-                        meta = src.meta.copy()
+                        meta = src_meta.copy()
                         meta.update({
                             "driver": "GTiff",
                             "dtype": "float32",
@@ -363,12 +379,16 @@ class LandSuitability(TargetingTool):
                         logging.debug("Reference raster created successfully.")
 
             # Wait until reference raster exists before continuing
-            while not os.path.exists(ref_raster):
-                logging.debug("Waiting for reference raster to be created...")
-                time.sleep(0.1)  # Small delay to avoid busy-waiting
+            if not wait_for_valid_raster(ref_raster):
+                raise RuntimeError(f"Reference raster not readable: {ref_raster}")
 
             # Align the current raster to the reference
-            data, transform = self.align_to_reference(data.filled(NO_DATA_VALUE), transform, ref_raster)
+            data, transform = self.align_to_reference(
+                data.filled(NO_DATA_VALUE),
+                transform,
+                crs,      
+                ref_raster
+            )
             data = np.ma.masked_equal(data, NO_DATA_VALUE)  # Reapply masking
 
             # Validate and adjust user-provided min_val and max_val
