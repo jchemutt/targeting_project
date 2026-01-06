@@ -264,6 +264,11 @@
         "min_val": 24.7348403931,
         "max_val": 29.1244506836
     },
+     {
+        "name": "ghana_Megathyrsus_maximus_forage_suitability.tif",
+        "min_val": 0.18421317636966705,
+        "max_val": 0.9460257887840271
+    },
     {
         "name": "ghana_percentage_tree_cover_loss.tif",
         "min_val": 0,

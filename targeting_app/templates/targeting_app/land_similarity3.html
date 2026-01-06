@@ -252,11 +252,7 @@ input, button, label, h5 {
                             <div id="fileError" class="error mt-2"></div>
                         </div>
                         
-                        <!-- Hidden inputs for storing data -->
-                        <input type="hidden" id="pointsInput" name="points" value="">
-                        <input type="hidden" id="uploadedPointsInput" name="uploadedPoints" value="">
-                    
-
+            
                     </div>
                 </div>
                 <div class="card small-text">
@@ -264,6 +260,7 @@ input, button, label, h5 {
                         <form id="selectedFilesForm" method="POST" action="/api/processLandSimilarity" onsubmit="return validateForm(event)">
                             {% csrf_token %}
                             <input type="hidden" id="pointsInput" name="points" value="">
+                            <input type="hidden" id="uploadedPointsInput" name="uploadedPoints" value="">
                             <div class="form-group">
                                 <label for="description">
                                     Description: <span style="color: red;">*</span>
@@ -425,7 +422,7 @@ input, button, label, h5 {
             mapSection.style.display = 'block'; // Show the map section
             fileUploadSection.style.display = 'none'; // Hide the file upload section
             aoiFileUpload.value = ''; // Clear file input
-            uploadedPointsInput.value = ''; // Clear uploaded points
+            uploadedPointsInput.value = ""; // Clear uploaded points
             fileError.textContent = ''; // Clear any error message
         }
     });
@@ -435,7 +432,7 @@ input, button, label, h5 {
             mapSection.style.display = 'none'; // Hide the map section
             fileUploadSection.style.display = 'block'; // Show the file upload section
             drawnItems.clearLayers(); // Clear map markers
-            pointsInput.value = ''; // Clear map points
+            pointsInput.value = ""; // Clear map points
         }
     });
 
@@ -685,27 +682,28 @@ input, button, label, h5 {
                 const aoiOptionFile = document.getElementById('aoiOptionFile').checked; // Check if "Upload File" is selected
 
                 let points = [];
+
                 if (aoiOptionMap) {
-                    // Capture points from the map
-                    points = JSON.parse(pointsInput.value || '[]');
-                    if (points.length === 0) {
-                        alert('Please select at least one point on the map.');
-                        return false;
-                    }
-                } else if (aoiOptionFile) {
-                    // Capture points from the map
-                    points = JSON.parse(uploadedPointsInput.value || '[]');
-                    if (points.length === 0) {
-                        alert('Please upload points data either in Geojson or csv format.');
-                        return false;
-                    }
-
+                points = JSON.parse(pointsInput.value || "[]");
+                if (points.length === 0) {
+                    alert("Please select at least one point on the map.");
+                    return false;
                 }
-
+                // ensure uploaded is not accidentally used
+                uploadedPointsInput.value = "";
+                } else {
+                points = JSON.parse(uploadedPointsInput.value || "[]");
+                if (points.length === 0) {
+                    alert("Please upload points data either in Geojson or csv format.");
+                    return false;
+                }
+               
+                pointsInput.value = JSON.stringify(points);
+                }
 
                 const formData = {
                     selectedFiles: Array.from(selectedFiles).map(item => item.querySelector(`input[type="hidden"]`).value),
-                    points: pointsInput.value||uploadedPointsInput.value, 
+                    points: pointsInput.value, 
                     description: descriptionValue,
                 };
 
