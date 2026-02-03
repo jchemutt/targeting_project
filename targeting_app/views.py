@@ -11,7 +11,7 @@ import geopandas as gpd
 from shapely.geometry import box
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
-from .land_suitability2 import LandSuitability
+from .land_suitability4 import LandSuitability
 from .land_similarity2 import LandSimilarity
 from .land_statistics2 import LandStatistics
 from django.views.decorators.http import require_POST
