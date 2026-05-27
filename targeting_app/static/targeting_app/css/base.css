@@ -1,0 +1,82 @@
+/* ============================================================
+   Base / shared styles + brand tokens
+   ============================================================ */
+:root {
+    --tt-green: #009933;
+    --tt-green-dark: #007a29;
+    --tt-green-tint: #eef6ef;
+    --tt-ink: #1f2d24;
+    --tt-muted: #5f6f64;
+    --tt-border: #e3e8e4;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+html, body {
+    height: 100%;
+}
+
+body {
+    font-size: 14px;
+    background-color: #fff;
+    color: var(--tt-ink);
+}
+
+/* Offset for the fixed navbar */
+.page-content {
+    padding-top: 76px;
+}
+
+@media (max-width: 991.98px) {
+    .page-content {
+        padding-top: 70px;
+    }
+}
+
+/* Simple page header used by inner pages (e.g. Resources) */
+.page-hero {
+    background: var(--tt-green-tint);
+    border-bottom: 1px solid var(--tt-border);
+    padding: 44px 0;
+}
+
+.page-hero h1 {
+    font-weight: 700;
+    color: var(--tt-ink);
+    margin-bottom: 8px;
+}
+
+.page-hero .lead {
+    color: var(--tt-muted);
+    margin-bottom: 0;
+    max-width: 680px;
+}
+
+/* Align Bootstrap's primary button with the brand green */
+.btn-primary {
+    background-color: var(--tt-green);
+    border-color: var(--tt-green);
+}
+
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:active,
+.btn-primary:not(:disabled):not(.disabled):active {
+    background-color: var(--tt-green-dark);
+    border-color: var(--tt-green-dark);
+}
+
+.btn-primary:focus,
+.btn-primary.focus {
+    box-shadow: 0 0 0 0.2rem rgba(0, 153, 51, 0.35);
+}
+
+a {
+    color: var(--tt-green-dark);
+}
+
+a:hover {
+    color: var(--tt-green);
+}

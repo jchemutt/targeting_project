@@ -1,0 +1,147 @@
+{% extends 'targeting_app/base.html' %}
+{% load static %}
+
+{% block title %}Land Suitability{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="https://unpkg.com/tippy.js@6/dist/tippy.css">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/tool_page.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="tool-page">
+    {{ js_config|json_script:"js-config" }}
+    <div class="container mt-4">
+        <h3>Data - Land Suitability</h3>
+        <div class="row">
+            <div class="col-md-4">
+                <div id="fileList"></div>
+            </div>
+            <div class="col-md-8">
+                <!-- Selected Data Table -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Selected Data:</h5>
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-sm" id="rasterTable">
+                                <thead>
+                                    <tr>
+                                        <th>Group</th>
+                                        <th>Layer</th>
+                                        <th>Min Value</th>
+                                        <th>Optimal From</th>
+                                        <th>Optimal To</th>
+                                        <th>Max Value</th>
+                                        <th>Combine? <span class="tooltip-trigger" data-tooltip="Select 'Yes' to combine this raster with the previous one, forming a group. Select 'No' to start a new group.">
+                                            <i class="fas fa-info-circle ml-1 text-info"></i>
+                                          </span></th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rasterTableBody">
+                                    <!-- Rows will be dynamically added -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Area of Interest (AOI) -->
+<!-- ================= AOI CARD ================= -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Area of Interest (AOI)</h5>
+
+                    <!-- AOI selection -->
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio"
+                               name="aoiOption" id="aoiOptionMap" value="map" checked>
+                        <label class="form-check-label" for="aoiOptionMap">
+                            Draw on map
+                        </label>
+                    </div>
+
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio"
+                               name="aoiOption" id="aoiOptionFile" value="file">
+                        <label class="form-check-label" for="aoiOptionFile">
+                            Upload file
+                        </label>
+                    </div>
+
+                    <!-- MAP (ALWAYS PRESENT) -->
+                    <div class="mt-3">
+                        <div id="map-container"></div>
+
+                        <div class="d-flex align-items-center mt-2">
+                            <small id="aoiStatus" class="text-muted aoi-status flex-grow-1">
+                                No AOI selected. Draw on the map or upload a file.
+                            </small>
+                            <button type="button" id="clearAoiBtn"
+                                    class="btn btn-outline-secondary btn-sm ml-2">
+                                Clear AOI
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- FILE UPLOAD -->
+                    <div id="fileUploadSection" class="mt-3" style="display:none;">
+                        <label for="aoiFileUpload">
+                            Upload AOI (GeoJSON / KML / Shapefile ZIP)
+                        </label>
+                        <input type="file"
+                               id="aoiFileUpload"
+                               class="form-control-file"
+                               accept=".geojson,.json,.kml,.zip">
+
+                        <small class="text-muted d-block mt-1">
+                            Shapefile must be a single <b>.zip</b> with
+                            .shp, .shx, .dbf (+ .prj recommended).
+                        </small>
+                    </div>
+
+                </div>
+            </div>
+
+                <!-- Form Submission -->
+                <div class="card">
+                    <div class="card-body">
+                        <form id="selectedFilesForm" method="POST" action="/api/processLandSuitability">
+                            {% csrf_token %}
+                            <input type="hidden" id="aoiInput" name="aoi" value="">
+                            <div class="form-group">
+                                <label for="description">
+                                    Description: <span style="color: red;">*</span>
+                                </label>
+                                <input type="text"  id="description" name="description" class="form-control"
+                                       placeholder="Enter a brief title of your analysis" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm" id="submitBtn"><i class="fas fa-play"></i> Run Analysis</button>
+                        </form>
+                        <div id="resultSection" class="mt-3" style="display: none;">
+                            <h4>Processing Complete</h4>
+                            <a id="downloadLink" href="#" class="btn btn-success btn-sm" download><i class="fas fa-download"></i> Download Result</a>
+                            <button id="viewResultBtn" class="btn btn-info btn-sm"><i class="fas fa-map"></i> View Map</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include 'targeting_app/includes/modals.html' %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/rainbowvis.js' %}"></script>
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
+    <script src="https://unpkg.com/@tmcw/togeojson@5.8.0/dist/togeojson.umd.js"></script>
+    <script src="{% static 'targeting_app/js/directory_browser.js' %}"></script>
+    <script src="{% static 'targeting_app/js/appv1.js' %}"></script>
+{% endblock %}

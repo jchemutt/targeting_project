@@ -1,0 +1,55 @@
+{% load static %}
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top">
+    <a class="navbar-brand" href="{% url 'landing_page' %}">
+        <img src="{% static 'targeting_app/images/alliance_logo_tt.png' %}" alt="Land Targeting Tools">
+    </a>
+
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav"
+            aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ml-auto">
+            <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'landing_page' %}active-nav{% endif %}"
+                   href="{% url 'landing_page' %}"
+                   {% if request.resolver_match.url_name == 'landing_page' %}aria-current="page"{% endif %}>
+                    Home
+                </a>
+            </li>
+
+            <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'suitability' %}active-nav{% endif %}"
+                   href="{% url 'suitability' %}"
+                   {% if request.resolver_match.url_name == 'suitability' %}aria-current="page"{% endif %}>
+                    Land Suitability
+                </a>
+            </li>
+
+            <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'similarity' %}active-nav{% endif %}"
+                   href="{% url 'similarity' %}"
+                   {% if request.resolver_match.url_name == 'similarity' %}aria-current="page"{% endif %}>
+                    Land Similarity
+                </a>
+            </li>
+
+            <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'statistics' %}active-nav{% endif %}"
+                   href="{% url 'statistics' %}"
+                   {% if request.resolver_match.url_name == 'statistics' %}aria-current="page"{% endif %}>
+                    Land Statistics
+                </a>
+            </li>
+
+            <li class="nav-item">
+                <a class="nav-link {% if request.resolver_match.url_name == 'resources' %}active-nav{% endif %}"
+                   href="{% url 'resources' %}"
+                   {% if request.resolver_match.url_name == 'resources' %}aria-current="page"{% endif %}>
+                    Resources
+                </a>
+            </li>
+        </ul>
+    </div>
+</nav>

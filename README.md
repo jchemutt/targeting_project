@@ -36,14 +36,15 @@ GRANT ALL PRIVILEGES ON DATABASE your_db_name TO your_db_user;
 \q
 ```
 
-Update your `data.json`:
+Create a `data.json` file in the project root (it is git-ignored). All
+keys below are read by `targeting_project/settings.py`; `postgres_port`
+is optional and defaults to `5432`.
 
-```python
+```json
 {
-    "base_directory": "",
     "SECRET_KEY": "",
-    "ALLOWED_HOSTS": ["localhost",
-    "127.0.0.1"],
+    "DEBUG": false,
+    "ALLOWED_HOSTS": ["localhost", "127.0.0.1"],
     "CSRF_TRUSTED_ORIGINS": [
         "http://localhost:8000",
         "http://127.0.0.1:8000"
@@ -52,6 +53,7 @@ Update your `data.json`:
     "postgres_user": "",
     "postgres_pass": "",
     "postgres_host": "",
+    "postgres_port": "5432"
 }
 ```
 

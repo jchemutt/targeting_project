@@ -1,0 +1,102 @@
+{% extends 'targeting_app/base.html' %}
+{% load static %}
+
+{% block title %}Land Similarity{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/tool_page.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="tool-page">
+    {{ js_config|json_script:"js-config" }}
+    <div class="container mt-4">
+        <h3>Data - Land Similarity</h3>
+        <div class="row">
+            <div class="col-md-5">
+                <div id="fileList"></div>
+            </div>
+            <div class="col-md-7">
+                <div class="card small-text mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Selected Data:</h5>
+                        <div id="selectedFilesContainer"></div>
+                    </div>
+                </div>
+                <div class="card small-text" id="aoiSection">
+                    <div class="card-body">
+                        <h5 class="card-title">Select Sample Points</h5>
+
+                        <div class="form-check-group d-flex align-items-center">
+                            <div class="form-check mr-3">
+                                <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionMap" value="map" checked>
+                                <label class="form-check-label" for="aoiOptionMap">Select on the Map</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionFile" value="file">
+                                <label class="form-check-label" for="aoiOptionFile">Upload File (Points GeoJSON/CSV (Latitude,Longitude))</label>
+                            </div>
+                        </div>
+                        
+                        <!-- Map section -->
+                        <div id="mapSection" class="mt-3">
+                            <div id="map-container"></div>
+                        </div>
+                        
+                        <!-- File upload section -->
+                        <div id="fileUploadSection" class="mt-3" style="display: none;">
+                            <label for="aoiFileUpload">Upload file (Points GeoJSON/CSV (Latitude,Longitude)):</label>
+                            <input type="file" id="aoiFileUpload" name="aoiFileUpload" accept=".geojson, .csv">
+                            <div id="fileError" class="error mt-2"></div>
+                        </div>
+                        
+            
+                    </div>
+                </div>
+                <div class="card small-text">
+                    <div class="card-body">
+                        <form id="selectedFilesForm" method="POST" action="/api/processLandSimilarity" onsubmit="return validateForm(event)">
+                            {% csrf_token %}
+                            <input type="hidden" id="pointsInput" name="points" value="">
+                            <input type="hidden" id="uploadedPointsInput" name="uploadedPoints" value="">
+                            <div class="form-group">
+                                <label for="description">
+                                    Description: <span style="color: red;">*</span>
+                                </label>
+                                <input type="text"  id="description" name="description" class="form-control"
+                                       placeholder="Enter a brief title of your analysis" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm" id="submitBtn"><i class="fas fa-play"> </i> Run Analysis</button>
+                        </form>
+                        <div id="resultSection" class="mt-3" style="display: none;">
+                            <h4>Processing Complete</h4>
+                            <a id="downloadMessLink" href="#" class="btn btn-success btn-sm" download>
+                                <i class="fas fa-download"></i> Download MESS
+                            </a>
+                            <a id="downloadMnobisLink" href="#" class="btn btn-success btn-sm" download>
+                                <i class="fas fa-download"></i> Download Mahalanobis Distance
+                            </a>
+                                        
+                            <button id="viewMnobisMapBtn" class="btn btn-info btn-sm mt-2">
+                                <i class="fas fa-map"></i> View Mahalanobis Map
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    {% include 'targeting_app/includes/modals.html' %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.1.0/chroma.min.js"></script>
+    <script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
+    <script src="{% static 'targeting_app/js/rainbowvis.js' %}"></script>
+    <script src="{% static 'targeting_app/js/directory_browser.js' %}"></script>
+    <script src="{% static 'targeting_app/js/similarity_page.js' %}"></script>
+{% endblock %}

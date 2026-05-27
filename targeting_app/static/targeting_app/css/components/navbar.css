@@ -1,0 +1,32 @@
+.navbar {
+    background-color: var(--tt-green);
+    font-size: 14px;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+}
+
+.navbar-brand img {
+    height: 40px;
+}
+
+.navbar-nav .nav-link {
+    color: #fff !important;
+    font-size: 1.05rem;
+    padding: 8px 14px;
+    border-radius: 4px;
+    transition: all 0.2s ease-in-out;
+}
+
+.navbar .nav-link:hover {
+    color: var(--tt-green) !important;
+    background-color: #fff !important;
+}
+
+.navbar .nav-link.active-nav {
+    color: var(--tt-green) !important;
+    background-color: #fff !important;
+    font-weight: 600;
+}
+
+.navbar-toggler {
+    border-color: rgba(255, 255, 255, 0.4);
+}

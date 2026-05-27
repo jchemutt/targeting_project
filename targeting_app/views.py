@@ -1,40 +1,83 @@
-import os
+"""
+Views for the targeting_app.
+
+Page views render the analysis tools; the `api/*` views are JSON endpoints
+called by the frontend to browse data, run analyses and manage the session.
+"""
+
 import json
-import geojson
-from django.http import JsonResponse
-from django.shortcuts import render
+import logging
+import os
+
 from django.conf import settings
-from django.views.decorators.csrf import csrf_exempt
-from django.http import HttpResponseBadRequest, HttpResponse
-import numpy as np
-import geopandas as gpd
-from shapely.geometry import box
-from django.http import JsonResponse, HttpResponse
-from django.views.decorators.csrf import csrf_exempt
-from .land_suitability4 import LandSuitability
-from .land_similarity2 import LandSimilarity
-from .land_statistics2 import LandStatistics
-from django.views.decorators.http import require_POST
-from django.views.decorators.csrf import csrf_protect
 from django.contrib.auth.decorators import user_passes_test
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import render
+from django.urls import reverse
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_POST
+
+import geojson
+
+from .land_similarity import LandSimilarity
+from .land_statistics import LandStatistics
+from .land_suitability import LandSuitability
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Page views
+# ---------------------------------------------------------------------------
+
+def _js_config():
+    """Values handed to the frontend via the ``#js-config`` json_script block.
+
+    Endpoint URLs are resolved with ``reverse()`` so the JavaScript never
+    hardcodes a path — change a route in urls.py and the frontend follows.
+    """
+    return {
+        'apiEndpoints': {
+            'directoryContents': reverse('get_directory_contents'),
+            'folderConfigurations': reverse('get_folder_configurations'),
+            'referenceLayers': reverse('get_reference_layers'),
+            'userFiles': reverse('get_user_files'),
+            'processLandSuitability': reverse('process_land_suitability'),
+            'processLandSimilarity': reverse('process_land_similarity'),
+            'processStatistics': reverse('process_statistics'),
+        },
+    }
+
 
 def landing_page(request):
-    return render(request, 'targeting_app/landing_page.html')
+    return render(request, 'targeting_app/pages/landing_page.html')
+
 
 def suitability(request):
-    return render(request, 'targeting_app/suitability.html')
+    return render(request, 'targeting_app/pages/suitability_page.html',
+                  {'js_config': _js_config()})
+
 
 def similarity(request):
-    return render(request, 'targeting_app/land_similarity3.html')
+    return render(request, 'targeting_app/pages/similarity_page.html',
+                  {'js_config': _js_config()})
+
 
 def statistics(request):
-    return render(request, 'targeting_app/land_statistics2.html')
+    return render(request, 'targeting_app/pages/statistics_page.html',
+                  {'js_config': _js_config()})
 
-import os
-from django.conf import settings
-from django.http import JsonResponse
+
+def resources(request):
+    return render(request, 'targeting_app/pages/resources_page.html')
+
+
+# ---------------------------------------------------------------------------
+# Data-browsing endpoints
+# ---------------------------------------------------------------------------
 
 def get_reference_layers(request):
+    """Return the .tif files found under a raster path (relative to BASE_DIR)."""
     raster_path = request.GET.get('raster_path', '')
     base_dir = os.path.join(settings.BASE_DIR, raster_path)
 
@@ -42,459 +85,374 @@ def get_reference_layers(request):
         return JsonResponse({'error': 'Path not found'}, status=404)
 
     files = [
-        {
-            'file_path': os.path.join(raster_path, f),  # Relative path
-            'name': f
-        }
-        for f in os.listdir(base_dir) if f.endswith('.tif')
+        {'file_path': os.path.join(raster_path, f), 'name': f}
+        for f in os.listdir(base_dir)
+        if f.endswith('.tif')
     ]
-
-    print("Processed Parameters:", json.dumps(files, indent=4))
-
+    logger.debug('Reference layers found: %d', len(files))
     return JsonResponse({'raster_files': files})
 
 
 def get_directory_contents(request):
-    # Root directory for raster files
-    base_dir = os.path.join(settings.BASE_DIR, 'data')
-    # Get the relative path from request or default to an empty string
-    path = request.GET.get('path', '')
+    """List directories and .tif files under ``data/<path>``.
 
-    # Full path to the directory
+    Each .tif is annotated with min/max values looked up from values.json.
+    """
+    base_dir = os.path.join(settings.BASE_DIR, 'data')
+    path = request.GET.get('path', '')
     full_path = os.path.join(base_dir, path.strip('/'))
 
     if not os.path.exists(full_path):
         return JsonResponse({'error': 'Directory not found'}, status=404)
 
-    contents = []
-    # Load JSON file with min_val and max_val values
+    # Load the min/max value config (optional).
     config_file_path = os.path.join(settings.BASE_DIR, 'values.json')
+    config_data = []
     if os.path.exists(config_file_path):
         with open(config_file_path, 'r') as f:
             config_data = json.load(f)
-    else:
-        config_data = {}
+    value_lookup = {item['name']: item for item in config_data}
 
+    contents = []
     for item in os.listdir(full_path):
         item_path = os.path.join(full_path, item)
         if os.path.isdir(item_path):
             contents.append({'name': item, 'type': 'directory'})
         elif os.path.isfile(item_path) and item.lower().endswith('.tif'):
-            # Search for min_val and max_val in config_data based on file name
-            min_val = None
-            max_val = None
-            for config_item in config_data:
-                if config_item['name'] == item:
-                    min_val = config_item.get('min_val')
-                    max_val = config_item.get('max_val')
-                    break
-            
-            contents.append({'name': item, 'type': 'file', 'min_val': min_val, 'max_val': max_val})
+            cfg = value_lookup.get(item, {})
+            contents.append({
+                'name': item,
+                'type': 'file',
+                'min_val': cfg.get('min_val'),
+                'max_val': cfg.get('max_val'),
+            })
 
     return JsonResponse(contents, safe=False)
 
-def get_folder_configurations(request):
-    folder_name = request.GET.get('folder', '')
-    # Fetch folder configurations from database or static JSON file
-    # Replace with your actual data fetching logic
-    configurations = {
-        'Africa': {'center': [7.1881, 21.0938], 'zoom': 2},
-        'Asia': {'center': [47.5162, 103.6609], 'zoom': 2},
-        'Global': {'center': [0, 0], 'zoom': 1},
-        'S.America': {'center': [-14.2350, -56.1167], 'zoom': 2},
-        'Ethiopia': {'center': [9.145, 40.4897], 'zoom': 5},
-        'Kenya': {'center': [1.2921, 36.8219], 'zoom': 5},
-        'Mali': {'center': [17.5707, -3.9962], 'zoom': 5},
-        'Rwanda': {'center': [-1.9403, 29.8739], 'zoom': 7},
-        'Senegal': {'center': [14.4974, -14.4524], 'zoom': 6},
-        'Tanzania': {'center': [-6.369028, 34.888822], 'zoom': 5},
-        'Tunisia': {'center': [33.8869, 9.5375], 'zoom': 5},
-        'Colombia': {'center': [4.5709, -74.2973], 'zoom': 5},
-        'Ghana': {'center': [7.9465, -1.0232], 'zoom': 6},
 
-        # Add configurations for other folders as needed
-    }
-    return JsonResponse(configurations.get(folder_name, {'center': [0, 0], 'zoom': 1}))
+# Map view configuration per region/folder.
+FOLDER_CONFIGURATIONS = {
+    'Africa': {'center': [7.1881, 21.0938], 'zoom': 2},
+    'Asia': {'center': [47.5162, 103.6609], 'zoom': 2},
+    'Global': {'center': [0, 0], 'zoom': 1},
+    'S.America': {'center': [-14.2350, -56.1167], 'zoom': 2},
+    'Ethiopia': {'center': [9.145, 40.4897], 'zoom': 5},
+    'Kenya': {'center': [1.2921, 36.8219], 'zoom': 5},
+    'Mali': {'center': [17.5707, -3.9962], 'zoom': 5},
+    'Rwanda': {'center': [-1.9403, 29.8739], 'zoom': 7},
+    'Senegal': {'center': [14.4974, -14.4524], 'zoom': 6},
+    'Tanzania': {'center': [-6.369028, 34.888822], 'zoom': 5},
+    'Tunisia': {'center': [33.8869, 9.5375], 'zoom': 5},
+    'Colombia': {'center': [4.5709, -74.2973], 'zoom': 5},
+    'Ghana': {'center': [7.9465, -1.0232], 'zoom': 6},
+}
+DEFAULT_FOLDER_CONFIGURATION = {'center': [0, 0], 'zoom': 1}
+
+
+def get_folder_configurations(request):
+    """Return the map center/zoom for a given region folder."""
+    folder_name = request.GET.get('folder', '')
+    return JsonResponse(
+        FOLDER_CONFIGURATIONS.get(folder_name, DEFAULT_FOLDER_CONFIGURATION)
+    )
+
+
+# ---------------------------------------------------------------------------
+# AOI helpers
+# ---------------------------------------------------------------------------
 
 def convert_aoi_to_geojson(aoi_str):
-    """
-    Converts an AOI string into GeoJSON polygon format.
-
-    Parameters:
-        aoi_str (str): AOI as a string of lat,lon pairs separated by semicolons.
-
-    Returns:
-        dict: GeoJSON polygon object.
-    """
+    """Convert a ``lat,lon;lat,lon;...`` AOI string into a GeoJSON polygon."""
     try:
-        # Parse the input string into a list of coordinates
         coordinates = []
-        for coord in aoi_str.split(";"):
-            lat, lon = map(float, coord.split(","))
-            coordinates.append([lon, lat])  # GeoJSON uses [longitude, latitude]
+        for coord in aoi_str.split(';'):
+            lat, lon = map(float, coord.split(','))
+            coordinates.append([lon, lat])  # GeoJSON uses [lon, lat]
 
-        # Ensure the polygon is closed
         if coordinates[0] != coordinates[-1]:
-            coordinates.append(coordinates[0])
+            coordinates.append(coordinates[0])  # close the ring
 
-        # Create the GeoJSON polygon
-        geojson_polygon = {
-            "type": "Polygon",
-            "coordinates": [coordinates]
-        }
-        return geojson_polygon
+        return {'type': 'Polygon', 'coordinates': [coordinates]}
     except Exception as e:
-        raise ValueError(f"Invalid AOI format: {e}")
+        raise ValueError(f'Invalid AOI format: {e}')
+
 
 def normalize_aoi_to_geometry(aoi):
-    """
-    Normalize AOI input (dict or JSON string) into a GeoJSON geometry dict.
-    Supports: Feature, FeatureCollection, Polygon, MultiPolygon.
+    """Normalise an AOI (dict or JSON string) into a GeoJSON geometry dict.
+
+    Accepts Feature, FeatureCollection, Polygon or MultiPolygon.
     """
     aoi_data = json.loads(aoi) if isinstance(aoi, str) else aoi
 
-    if not isinstance(aoi_data, dict) or "type" not in aoi_data:
+    if not isinstance(aoi_data, dict) or 'type' not in aoi_data:
         raise ValueError("Invalid AOI GeoJSON: missing 'type'.")
 
-    t = aoi_data["type"]
+    aoi_type = aoi_data['type']
 
-    # Feature -> geometry
-    if t == "Feature":
-        geom = aoi_data.get("geometry")
+    if aoi_type == 'Feature':
+        geom = aoi_data.get('geometry')
         if not geom:
             raise ValueError("GeoJSON Feature is missing 'geometry'.")
         return geom
 
-    # FeatureCollection -> use first feature geometry
-    if t == "FeatureCollection":
-        feats = aoi_data.get("features", [])
-        if not feats:
-            raise ValueError("GeoJSON FeatureCollection has no features.")
-        geom = feats[0].get("geometry")
+    if aoi_type == 'FeatureCollection':
+        features = aoi_data.get('features', [])
+        if not features:
+            raise ValueError('GeoJSON FeatureCollection has no features.')
+        geom = features[0].get('geometry')
         if not geom:
-            raise ValueError("First feature in FeatureCollection has no geometry.")
+            raise ValueError('First feature in FeatureCollection has no geometry.')
         return geom
 
-    # Already a geometry
-    if t in ("Polygon", "MultiPolygon"):
+    if aoi_type in ('Polygon', 'MultiPolygon'):
         return aoi_data
 
-    raise ValueError(f"Unsupported AOI type: {t}. Expected Feature/FeatureCollection/Polygon/MultiPolygon.")
+    raise ValueError(
+        f'Unsupported AOI type: {aoi_type}. '
+        'Expected Feature/FeatureCollection/Polygon/MultiPolygon.'
+    )
 
+
+def _bbox_string_to_polygon(aoi_str):
+    """Convert a ``minLat,minLon,maxLat,maxLon`` bbox string into a polygon."""
+    coords = [c.strip() for c in aoi_str.split(',')]
+    if len(coords) != 4:
+        raise ValueError('Invalid AOI bbox format. Expected 4 comma-separated values.')
+    min_lat, min_lon, max_lat, max_lon = map(float, coords)
+    return {
+        'type': 'Polygon',
+        'coordinates': [[
+            [min_lon, min_lat],
+            [max_lon, min_lat],
+            [max_lon, max_lat],
+            [min_lon, max_lat],
+            [min_lon, min_lat],
+        ]],
+    }
+
+
+def _resolve_aoi_geometry(aoi):
+    """Resolve any supported AOI input into a polygonal GeoJSON geometry."""
+    if isinstance(aoi, dict):
+        geometry = normalize_aoi_to_geometry(aoi)
+    elif isinstance(aoi, str):
+        aoi_str = aoi.strip()
+        try:
+            geometry = normalize_aoi_to_geometry(aoi_str)
+        except json.JSONDecodeError:
+            if ';' in aoi_str:
+                geometry = convert_aoi_to_geojson(aoi_str)
+            elif ',' in aoi_str:
+                geometry = _bbox_string_to_polygon(aoi_str)
+            else:
+                raise ValueError('Invalid AOI format.')
+    else:
+        raise ValueError('Unsupported AOI input type.')
+
+    if not isinstance(geometry, dict) or geometry.get('type') not in ('Polygon', 'MultiPolygon'):
+        raise ValueError(
+            f"Unsupported AOI geometry: {geometry.get('type')}. "
+            'Only Polygon/MultiPolygon are supported.'
+        )
+    return geometry
+
+
+# ---------------------------------------------------------------------------
+# Analysis endpoints
+# ---------------------------------------------------------------------------
 
 @require_POST
 @csrf_protect
 def process_land_suitability(request):
-    if request.method != "POST":
-        return HttpResponse(status=405)
-
+    """Run the Land Suitability analysis from posted form data."""
     try:
         form_data = json.loads(request.body)
 
-        aoi = form_data.get("aoi", None)  # optional
-        selected_files = form_data.get("selectedFiles", [])
-        raster_parameters = form_data.get("rasterParameters", {})
-        description = (form_data.get("description", "") or "").strip()
+        aoi = form_data.get('aoi')  # optional
+        selected_files = form_data.get('selectedFiles', [])
+        raster_parameters = form_data.get('rasterParameters', {})
+        description = (form_data.get('description', '') or '').strip()
 
         if not description:
             return JsonResponse(
-                {"status": "error", "message": "Description is required."},
-                status=400
+                {'status': 'error', 'message': 'Description is required.'},
+                status=400,
             )
 
-        # Initialize parameters
-        parameters = {"description": description}
+        parameters = {'description': description}
 
-        # -------------------------
-        # AOI handling
-        # -------------------------
+        # AOI is optional; resolve it to a polygon when supplied.
         if aoi:
-            # Case 1: AOI is dict already (GeoJSON)
-            if isinstance(aoi, dict):
-                geometry = normalize_aoi_to_geometry(aoi)
-
-            # Case 2: AOI is string
-            elif isinstance(aoi, str):
-                aoi_str = aoi.strip()
-
-                # Try GeoJSON JSON string first
-                try:
-                    geometry = normalize_aoi_to_geometry(aoi_str)
-                except json.JSONDecodeError:
-                    # Not JSON -> try your custom formats
-                    if ";" in aoi_str:
-                        # semicolon polygon string -> convert
-                        geometry = convert_aoi_to_geojson(aoi_str)
-                    elif "," in aoi_str:
-                        # bbox string "minLat,minLon,maxLat,maxLon" (your current interpretation)
-                        coords = [c.strip() for c in aoi_str.split(",")]
-                        if len(coords) != 4:
-                            return JsonResponse(
-                                {"status": "error", "message": "Invalid AOI bbox format. Expected 4 comma-separated values."},
-                                status=400
-                            )
-                        min_lat, min_lon, max_lat, max_lon = map(float, coords)
-                        geometry = {
-                            "type": "Polygon",
-                            "coordinates": [[
-                                [min_lon, min_lat],
-                                [max_lon, min_lat],
-                                [max_lon, max_lat],
-                                [min_lon, max_lat],
-                                [min_lon, min_lat],
-                            ]]
-                        }
-                    else:
-                        return JsonResponse(
-                            {"status": "error", "message": "Invalid AOI format."},
-                            status=400
-                        )
-            else:
-                return JsonResponse(
-                    {"status": "error", "message": "Unsupported AOI input type."},
-                    status=400
-                )
-
-            # Ensure AOI geometry is polygonal
-            if not isinstance(geometry, dict) or geometry.get("type") not in ("Polygon", "MultiPolygon"):
-                return JsonResponse(
-                    {"status": "error", "message": f"Unsupported AOI geometry: {geometry.get('type')}. Only Polygon/MultiPolygon are supported."},
-                    status=400
-                )
-
-            parameters["out_extent"] = geometry
-            print("AOI processed as GeoJSON geometry:", parameters["out_extent"])
-
+            try:
+                parameters['out_extent'] = _resolve_aoi_geometry(aoi)
+            except ValueError as ve:
+                return JsonResponse({'status': 'error', 'message': str(ve)}, status=400)
+            logger.debug('AOI resolved to geometry: %s', parameters['out_extent'])
         else:
-            print("AOI not provided. Proceeding without spatial extent filter.")
+            logger.debug('No AOI provided; proceeding without spatial extent filter.')
 
-        # -------------------------
-        # Validate selected rasters
-        # -------------------------
         if not selected_files:
             return JsonResponse(
-                {"status": "error", "message": "No raster files selected."},
-                status=400
+                {'status': 'error', 'message': 'No raster files selected.'},
+                status=400,
             )
 
-        # -------------------------
-        # Collect raster params
-        # -------------------------
         for i, file_path in enumerate(selected_files):
             if file_path not in raster_parameters:
                 return JsonResponse(
-                    {"status": "error", "message": f"Missing parameters for raster {file_path}."},
-                    status=400
+                    {'status': 'error',
+                     'message': f'Missing parameters for raster {file_path}.'},
+                    status=400,
                 )
-
             rp = raster_parameters[file_path]
+            idx = i + 1
+            parameters[f'in_raster_{idx}'] = 'data' + file_path
+            parameters[f'min_val_{idx}'] = rp['min_val']
+            parameters[f'opti_from_{idx}'] = rp['opti_from']
+            parameters[f'opti_to_{idx}'] = rp['opti_to']
+            parameters[f'max_val_{idx}'] = rp['max_val']
+            parameters[f'combine_{idx}'] = rp['combine']
 
-            parameters[f"in_raster_{i + 1}"] = "data" + file_path
-            parameters[f"min_val_{i + 1}"] = rp["min_val"]
-            parameters[f"opti_from_{i + 1}"] = rp["opti_from"]
-            parameters[f"opti_to_{i + 1}"] = rp["opti_to"]
-            parameters[f"max_val_{i + 1}"] = rp["max_val"]
-            parameters[f"combine_{i + 1}"] = rp["combine"]
+        logger.debug('Land suitability parameters: %s', parameters)
 
-        print("Processed Parameters:", json.dumps(parameters, indent=4))
-
-        # Run tool
         suitability_tool = LandSuitability(parameters, request.session)
         result_relative_url = suitability_tool.execute()
         result_absolute_url = request.build_absolute_uri(result_relative_url)
 
-        return JsonResponse({"status": "success", "result_url": result_absolute_url})
+        return JsonResponse({'status': 'success', 'result_url': result_absolute_url})
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+        logger.exception('Land suitability processing failed')
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
-def get_user_files(request):
-    """
-    Retrieve a list of files generated by the user during the session.
-    """
-    files = request.session.get("generated_files", [])
-    return JsonResponse(files, safe=False)
-
-
-
-@user_passes_test(lambda u: u.is_superuser)
-def manage_session(request, action):
-    if action == "flush":
-        request.session.flush()
-        return JsonResponse({"message": "Session completely cleared!"})
-    elif action == "clear":
-        request.session.clear()
-        return JsonResponse({"message": "All session keys cleared, session still active."})
-    elif action == "clear_key":
-        key = "generated_files"
-        request.session.pop(key, None)
-        return JsonResponse({"message": f"Session key '{key}' cleared (if it existed)."})
-    return JsonResponse({"message": "Invalid action!"})
 
 @require_POST
 @csrf_protect
 def process_land_similarity(request):
-    if request.method == 'POST':
-        try:
-            # Parse the form data
-            data = json.loads(request.body)
+    """Run the Land Similarity analysis from posted form data."""
+    try:
+        data = json.loads(request.body)
 
-            # Extract the parameters
-            # Extract the parameters
-            selected_files = data.get('selectedFiles', [])
-            coordinates = json.loads(data.get('points', '[]'))
-            description = data.get('description', '').strip()
-            if not description:
-                return JsonResponse({'status': 'error', 'message': 'Description is required.'}, status=400)
+        selected_files = data.get('selectedFiles', [])
+        coordinates = json.loads(data.get('points', '[]'))
+        description = data.get('description', '').strip()
+
+        if not description:
+            return JsonResponse(
+                {'status': 'error', 'message': 'Description is required.'},
+                status=400,
+            )
+
+        logger.debug('Received %d coordinate(s)', len(coordinates))
+
+        # Coordinates must be [longitude, latitude] numeric pairs.
+        features = []
+        for coord in coordinates:
+            if not (isinstance(coord, list) and len(coord) == 2):
+                return JsonResponse(
+                    {'status': 'error', 'message': f'Invalid coordinate format: {coord}'}
+                )
+            lon, lat = coord
+            if not (isinstance(lon, (int, float)) and isinstance(lat, (int, float))):
+                return JsonResponse(
+                    {'status': 'error', 'message': f'Invalid coordinate values: {coord}'}
+                )
+            features.append(geojson.Feature(geometry=geojson.Point((lon, lat))))
+
+        parameters = {
+            'selectedFiles': selected_files,
+            'in_point': geojson.FeatureCollection(features),
+            'description': description,
+        }
+
+        land_similarity = LandSimilarity(parameters, request.session)
+        result = land_similarity.execute()
+
+        return JsonResponse({
+            'status': 'success',
+            'result_url': {
+                'mnobis': request.build_absolute_uri(result['Mahalanobis']),
+                'mess': request.build_absolute_uri(result['MESS']),
+            },
+        })
+
+    except Exception as e:
+        logger.exception('Land similarity processing failed')
+        return JsonResponse({'status': 'error', 'message': str(e)})
 
 
-          
-           
-            # Debugging logs
-            print("Received coordinates:", coordinates)
-
-            # Ensure coordinates are in [longitude, latitude] format
-            features = []
-            for coord in coordinates:
-                if isinstance(coord, list) and len(coord) == 2:
-                    lon, lat = coord
-                    print(f"Processing coordinate: lon={lon}, lat={lat}")  # Debugging log
-                    if isinstance(lon, (int, float)) and isinstance(lat, (int, float)):
-                        features.append(geojson.Feature(geometry=geojson.Point((lon, lat))))
-                    else:
-                        print(f"Invalid coordinate values: {coord}")  # Debugging log
-                        return JsonResponse({'status': 'error', 'message': f'Invalid coordinate values: {coord}'})
-                else:
-                    print(f"Invalid coordinate format: {coord}")  # Debugging log
-                    return JsonResponse({'status': 'error', 'message': f'Invalid coordinate format: {coord}'})
-            
-            feature_collection = geojson.FeatureCollection(features)
-            
-
-
-            # Prepare parameters for the LandSimilarity class
-            parameters = {
-                'selectedFiles': selected_files,
-                'in_point': feature_collection,
-                'description': description
-            }
-
-            #return JsonResponse({'status': 'error', 'message': str(parameters)})
-
-            # Instantiate and execute the LandSimilarity class
-            land_similarity = LandSimilarity(parameters,request.session)
-            result = land_similarity.execute()
-
-            result_mnobis_url = request.build_absolute_uri(result['Mahalanobis'])
-            result_mess_url = request.build_absolute_uri(result['MESS'])
-            return JsonResponse({'status': 'success', 'result_url': {'mnobis': result_mnobis_url,'mess': result_mess_url}})
-            #return JsonResponse(response_data)
-
-        except Exception as e:
-            return JsonResponse({'status': 'error', 'message': str(e)})
-
-    return JsonResponse({'status': 'error', 'message': 'Invalid request method.'})
-
-'''@csrf_exempt
-def process_land_statistics(request):
-    """
-    Handle the processing of land statistics by accepting boundary GeoJSON, raster file path,
-    and additional parameters like zone_id_column.
-    """
-    if request.method == 'POST':
-        try:
-            # Parse request data
-            data = json.loads(request.body)
-            boundaries_geojson = data.get('boundary')
-            raster_file = data.get('raster_path')
-            description = data.get('description', '')
-            zone_id_column = data.get('zone_id_column')
-
-            # Validate required inputs
-            if not boundaries_geojson:
-                return JsonResponse({'status': 'error', 'message': 'Boundary GeoJSON is required.'}, status=400)
-            if not raster_file:
-                return JsonResponse({'status': 'error', 'message': 'Raster file path is required.'}, status=400)
-            if not zone_id_column:
-                return JsonResponse({'status': 'error', 'message': 'Zone ID column is required.'}, status=400)
-
-            # Initialize and process zonal statistics
-            try:
-                processor = LandStatistics(boundaries_geojson, raster_file, description, zone_id_column)
-                print("Processor initialized. Computing statistics...")
-                results = processor.compute_statistics()
-                print("Statistics computed successfully:", results)
-            except FileNotFoundError as fnfe:
-                print("File not found error:", str(fnfe))
-                return JsonResponse({'status': 'error', 'message': str(fnfe)}, status=404)
-            except ValueError as ve:
-                print("Value error during statistics computation:", str(ve))
-                return JsonResponse({'status': 'error', 'message': str(ve)}, status=400)
-            except Exception as e:
-                print("Unexpected error during statistics computation:", str(e))
-                return JsonResponse({'status': 'error', 'message': f'Unexpected error: {str(e)}'}, status=500)
-
-            # Return successful results
-            return JsonResponse({'status': 'success', 'results': results}, safe=False)
-
-        except json.JSONDecodeError:
-            print("Invalid JSON format in request body.")
-            return JsonResponse({'status': 'error', 'message': 'Invalid JSON format in request body.'}, status=400)
-        except Exception as e:
-            print("Unhandled exception:", str(e))
-            return JsonResponse({'status': 'error', 'message': f'Unhandled server error: {str(e)}'}, status=500)
-
-    print(f"Invalid request method: {request.method}")
-    return JsonResponse({'status': 'error', 'message': f'Invalid request method: {request.method}'}, status=405)
-'''
 @require_POST
 @csrf_protect
 def process_statistics(request):
-    """
-    Handle the processing of land statistics by accepting boundary GeoJSON, raster file path,
-    and additional parameters like zone_id_column.
-    """
-    if request.method == 'POST':
+    """Run zonal statistics for a raster against a reference layer."""
+    try:
+        data = json.loads(request.body)
+        raster_file = data.get('raster_path')
+        description = data.get('description', '')
+        reference_layer = data.get('reference_layer')
+        stat_types = data.get('stat_types', [])
+
+        if not reference_layer:
+            return JsonResponse(
+                {'status': 'error', 'message': 'Reference Layer is required.'},
+                status=400,
+            )
+        if not raster_file:
+            return JsonResponse(
+                {'status': 'error', 'message': 'Raster file path is required.'},
+                status=400,
+            )
+
         try:
-            # Parse request data
-            data = json.loads(request.body)
-            raster_file = data.get('raster_path')
-            description = data.get('description', '')
-            reference_layer = data.get('reference_layer')
-            stat_types = data.get('stat_types', [])
-
-            # Validate required inputs
-            if not reference_layer:
-                return JsonResponse({'status': 'error', 'message': 'Reference Layer is required.'}, status=400)
-            if not raster_file:
-                return JsonResponse({'status': 'error', 'message': 'Raster file path is required.'}, status=400)
-            
-
-            # Initialize and process zonal statistics
-            try:
-                processor = LandStatistics(reference_layer, raster_file, description,stat_types)
-                print("Processor initialized. Computing statistics...")
-                results = processor.compute_statistics()
-                print("Statistics computed successfully:", results)
-            except FileNotFoundError as fnfe:
-                print("File not found error:", str(fnfe))
-                return JsonResponse({'status': 'error', 'message': str(fnfe)}, status=404)
-            except ValueError as ve:
-                print("Value error during statistics computation:", str(ve))
-                return JsonResponse({'status': 'error', 'message': str(ve)}, status=400)
-            except Exception as e:
-                print("Unexpected error during statistics computation:", str(e))
-                return JsonResponse({'status': 'error', 'message': f'Unexpected error: {str(e)}'}, status=500)
-
-            # Return successful results
-            return JsonResponse({'status': 'success', 'results': results}, safe=False)
-
-        except json.JSONDecodeError:
-            print("Invalid JSON format in request body.")
-            return JsonResponse({'status': 'error', 'message': 'Invalid JSON format in request body.'}, status=400)
+            processor = LandStatistics(reference_layer, raster_file, description, stat_types)
+            results = processor.compute_statistics()
+            logger.debug('Statistics computed successfully')
+        except FileNotFoundError as fnfe:
+            return JsonResponse({'status': 'error', 'message': str(fnfe)}, status=404)
+        except ValueError as ve:
+            return JsonResponse({'status': 'error', 'message': str(ve)}, status=400)
         except Exception as e:
-            print("Unhandled exception:", str(e))
-            return JsonResponse({'status': 'error', 'message': f'Unhandled server error: {str(e)}'}, status=500)
+            logger.exception('Statistics computation failed')
+            return JsonResponse(
+                {'status': 'error', 'message': f'Unexpected error: {e}'},
+                status=500,
+            )
 
-    print(f"Invalid request method: {request.method}")
-    return JsonResponse({'status': 'error', 'message': f'Invalid request method: {request.method}'}, status=405)
+        return JsonResponse({'status': 'success', 'results': results}, safe=False)
+
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'status': 'error', 'message': 'Invalid JSON format in request body.'},
+            status=400,
+        )
+    except Exception as e:
+        logger.exception('Unhandled error in process_statistics')
+        return JsonResponse(
+            {'status': 'error', 'message': f'Unhandled server error: {e}'},
+            status=500,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Session management
+# ---------------------------------------------------------------------------
+
+def get_user_files(request):
+    """Return the list of files generated by the user during the session."""
+    files = request.session.get('generated_files', [])
+    return JsonResponse(files, safe=False)
+
+
+@user_passes_test(lambda u: u.is_superuser)
+def manage_session(request, action):
+    """Superuser-only helper to inspect/clear the current session."""
+    if action == 'flush':
+        request.session.flush()
+        return JsonResponse({'message': 'Session completely cleared!'})
+    if action == 'clear':
+        request.session.clear()
+        return JsonResponse({'message': 'All session keys cleared, session still active.'})
+    if action == 'clear_key':
+        request.session.pop('generated_files', None)
+        return JsonResponse({'message': "Session key 'generated_files' cleared (if it existed)."})
+    return JsonResponse({'message': 'Invalid action!'})

@@ -1,0 +1,135 @@
+{% extends 'targeting_app/base.html' %}
+{% load static %}
+
+{% block title %}Land Statistics{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'targeting_app/css/pages/statistics_page.css' %}">
+{% endblock %}
+
+{% block content %}
+<form style="display:none;">
+    {% csrf_token %}
+</form>
+
+{{ js_config|json_script:"js-config" }}
+
+<div class="container mt-4">
+    <h3>My Processed Files</h3>
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="table-responsive">
+                <table class="table table-bordered table-sm">
+                    <thead>
+                        <tr>
+                            <th>Description</th>
+                            <th>Created At</th>
+                            <th>Select File</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userFilesTableBody">
+                        <!-- Files will be dynamically added here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <table class="table table-bordered mb-3">
+                <tbody>
+                    <tr>
+                        <td><strong>Select Reference Layer</strong></td>
+                        <td>
+                            <select id="zoneIdColumn" class="form-control">
+                                <option value="">Select Reference Layer</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>Select Statistic Types</strong></td>
+                        <td>
+                            <div class="dropdown">
+                                <button class="btn btn-outline-secondary dropdown-toggle" type="button"
+                                        id="statDropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                    Statistic Types
+                                </button>
+                                <div class="dropdown-menu" aria-labelledby="statDropdown">
+                                    <label class="dropdown-item">
+                                        <input type="checkbox" class="stat-checkbox" id="allStatsCheckbox" value="All"> All
+                                    </label>
+                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="mean"> Mean</label>
+                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="sum"> Sum</label>
+                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="median"> Median</label>
+                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="min"> Minimum</label>
+                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="max"> Maximum</label>
+                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="std"> Standard Deviation</label>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div id="map-container"></div>
+
+            <button id="processBtn" class="btn btn-primary mt-3" disabled>
+                Process Statistics
+            </button>
+        </div>
+    </div>
+
+    <div id="resultsSection" class="mt-5" style="display: none;">
+        <h3>Results</h3>
+        <button id="downloadCsvBtn" class="btn btn-success mt-3" style="display: none;">
+            Download CSV
+        </button>
+        <button id="plotChartBtn" class="btn btn-info mt-3 ml-2" style="display: none;">
+            Plot
+        </button>
+        <div id="resultsTable"></div>
+    </div>
+</div>
+
+<div class="modal fade" id="chartModal" tabindex="-1" aria-labelledby="chartModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="chartModalLabel">Land Statistics Chart</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <label for="statSelect">Select Statistic to Plot:</label>
+                <select id="statSelect" class="form-control mb-3"></select>
+                <div class="stat-chart-wrap">
+                    <canvas id="statChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="processingModal" tabindex="-1" aria-labelledby="processingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading.</span>
+                </div>
+                <p class="mt-3">Processing your request. Please wait...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
+<script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.1.0/chroma.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script src="{% static 'targeting_app/js/statistics_page.js' %}"></script>
+{% endblock %}

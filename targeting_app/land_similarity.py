@@ -11,337 +11,291 @@ from dbfread import DBF
 import geopandas as gpd
 import csv
 import re
-from osgeo import gdal
+import shutil
+#from osgeo import gdal
+from django.utils.timezone import now
+from pathlib import Path
 
 from .similarity_analysis import similarity_analysis
 
-# Ensure GDAL_DATA environment variable is set correctly
-os.environ['GDAL_DATA'] = os.environ['CONDA_PREFIX'] + r'\Library\share\gdal'
-print(f"GDAL_DATA is set to: {os.environ.get('GDAL_DATA')}")
+# Ensure GDAL_DATA is set correctly
+#os.environ['GDAL_DATA'] = os.environ['CONDA_PREFIX'] + r'\Library\share\gdal'
+#print(f"GDAL_DATA is set to: {os.environ.get('GDAL_DATA')}")
 
 class LandSimilarity:
-    def __init__(self, parameters):
+    def __init__(self, parameters,session):
         self.label = "Land Similarity"
-        self.description = ""
-        self.canRunInBackground = False
-        self.value_table_cols = 6
-        self.spatial_ref = "EPSG:4326"  # Assuming WGS84
         self.parameters = parameters
+        self.session = session
+        self.spatial_ref = "EPSG:4326"  # Default spatial reference system (WGS84)
         self.ras_temp_path = self.create_unique_temp_path()
+        print(f"Temporary processing path: {self.ras_temp_path}")
 
-    def create_unique_temp_path(self):
-        workspace_path = os.getcwd().replace("\\", "/")
-        media_dir = os.path.join(workspace_path, "media")
-        if not os.path.exists(media_dir):
-            os.makedirs(media_dir)
-
-        output_dir = os.path.join(media_dir, "output")
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+    @staticmethod
+    def create_unique_temp_path():
+        """
+        Create a unique temporary path for processing.
+        """
+        base_path = os.getcwd().replace("\\", "/")
+        temp_dir = os.path.join(base_path, "media/output")
+        os.makedirs(temp_dir, exist_ok=True)
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         unique_id = uuid.uuid4().hex
-        temp_path = os.path.join(output_dir, f"processing_{timestamp}_{unique_id}")
-        if not os.path.exists(temp_path):
-            os.makedirs(temp_path)
+        temp_path = os.path.join(temp_dir, f"processing_{timestamp}_{unique_id}")
+        os.makedirs(temp_path, exist_ok=True)
+        print(f"Created unique temp path: {temp_path}")
         return temp_path
 
-    def get_value_table_count(self, parameters):
-        return len(parameters['selectedFiles'])
-
-    def prepare_value_table(self, parameters):
+    def prepare_value_table(self):
+        """
+        Prepare the value table from selected raster files.
+        """
         value_table = OrderedDict()
-        for idx, path in enumerate(parameters['selectedFiles']):
-            if re.search(r'\d+', str(idx)) is None:
-                continue
-
-            if idx not in value_table.keys():
-                value_table[idx] = []
-            value_table[idx].append(os.path.join('data', path.lstrip('/')))
+        for idx, path in enumerate(self.parameters.get('selectedFiles', [])):
+            if re.search(r'\d+', str(idx)):
+                raster_path = os.path.join('data', path.lstrip('/'))
+                print(f"Adding raster to value table: {raster_path}")
+                value_table[idx] = [raster_path]
         return value_table.values()
 
-    def updateParameters(self, parameters):
-        return
-
-    def get_min_cell_size(self, images):
-        ras_cell_size = {}
-        extent_array = []
-
-        for img in images:
-            if isinstance(img, list):
-                img = img[0]
-            img = img.replace("'", "").strip()
-            with rasterio.open(img) as src:
-                cellsize = src.res[0]
-                ras_cell_size[img] = cellsize
-                extent = src.bounds
-                extent_ls = [extent.left, extent.bottom, extent.right, extent.top]
-                extent_array.append(extent_ls)
-
-        min_extent = list(np.amin(np.array(extent_array), axis=0))
-        min_size = min(ras_cell_size.values())
-        output = {
-            'diff_cell_raster': [],
-            'diff_ext_raster': [],
-            'source_ext_ras': None,
-            'source_cell_ras': None,
-            'min_extent': min_extent,
-            'min_size': min_size
-        }
-
-        for img in images:
-            if isinstance(img, list):
-                img = img[0]
-            img = img.replace("'", "").strip()
-            with rasterio.open(img) as src:
-                cellsize = src.res[0]
-                extent = src.bounds
-                extent_ls = [extent.left, extent.bottom, extent.right, extent.top]
-                if extent_ls != min_extent:
-                    output['diff_ext_raster'].append(img)
-                else:
-                    output['source_ext_ras'] = img
-
-                if min_size != cellsize:
-                    output['diff_cell_raster'].append(img)
-                else:
-                    output['source_cell_ras'] = img
-
-        return output
-
-    def equalize_raster(self, infos, all_rasters, processing_path):
-        processed_raster = []
-        for raster in all_rasters:
-            if isinstance(raster, list):
-                raster = raster[0]
-            raster = raster.replace("'", "").strip()
-
-            clip_name = f'clip_{os.path.basename(raster)}'
-            res_name = f'res_{os.path.basename(raster)}'
-
-            clip_raster = os.path.join(processing_path, clip_name)
-            res_raster = os.path.join(processing_path, res_name)
-
-            with rasterio.open(raster) as src:
-                out_image, out_transform = mask(src, [infos['min_extent']], crop=True)
-                out_meta = src.meta.copy()
-                out_meta.update({"driver": "GTiff",
-                                 "height": out_image.shape[1],
-                                 "width": out_image.shape[2],
-                                 "transform": out_transform})
-                with rasterio.open(clip_raster, "w", **out_meta) as dest:
-                    dest.write(out_image)
-
-            gdal.Warp(res_raster, clip_raster, xRes=infos['min_size'], yRes=infos['min_size'], resampleAlg='nearest')
-
-            processed_raster.append(res_raster)
-        return processed_raster
-
-    def reproject_points(self, points_gdf, target_crs):
-        points_gdf = points_gdf.to_crs(epsg=4326)  # Assuming input points are in WGS84
+    @staticmethod
+    def reproject_points(points_gdf, target_crs):
+        """
+        Reproject a GeoDataFrame to a target CRS.
+        """
+        print(f"Reprojecting points to CRS: {target_crs}")
         points_gdf = points_gdf.to_crs(target_crs)
         return points_gdf
 
+
+    def sample_rasters(self, rasters, points_path, output_path):
+        """
+        Sample raster values at point locations and save as a shapefile.
+        """
+        print(f"Sampling rasters from: {rasters}")
+        print(f"Using points from: {points_path}")
+        print(f"Output path: {output_path}")
+
+        sampled_data = []
+        points_gdf = gpd.read_file(points_path)
+        print(f"Loaded points GeoDataFrame: {points_gdf.head()}")
+
+        # Initialize sampled points list
+        sampled_points = []
+
+        # Sample raster values at the points
+        for raster_path in rasters:
+            try:
+                with rasterio.open(raster_path) as src:
+                    print(f"Processing raster: {raster_path}")
+                    for point in points_gdf.geometry:
+                        try:
+                            row, col = src.index(point.x, point.y)
+                            sample_value = src.read(1)[row, col]
+                            sampled_data.append(sample_value)
+                            sampled_points.append(point)  # geometry for this sample
+                        except IndexError:
+                            print(f"Point {point} is outside raster bounds.")
+                            sampled_data.append(np.nan)
+                            sampled_points.append(point)  # <-- add this line
+            except Exception as e:
+                print(f"Error processing raster {raster_path}: {e}")
+
+
+        # Save sampled data to shapefile if samples exist
+        if sampled_data:
+            print("Writing sampled data to shapefile...")
+            sample_df = pd.DataFrame({'values': sampled_data})
+            sample_gdf = gpd.GeoDataFrame(sample_df, geometry=sampled_points, crs=points_gdf.crs)
+            sample_gdf.to_file(output_path, driver='ESRI Shapefile')
+            print(f"Sampled shapefile written to: {output_path}")
+        else:
+            print("No sampled data available. Skipping shapefile creation.")
+
+    def write_csv_from_dbf(self, dbf_path, csv_path):
+        """
+        Convert a DBF file to a CSV format.
+        """
+
+        try:
+            with open(csv_path, 'w', newline='') as csv_file:
+                db = DBF(dbf_path)
+                writer = csv.writer(csv_file)
+                writer.writerow(db.field_names)  # Write headers
+                for record in db:
+                    writer.writerow(list(record.values()))  # Write each record
+        except Exception as e:
+            print(f"Error converting DBF to CSV: {e}")
+            raise
+    def store_metadata_in_session(self, file_metadata):
+            """
+            Store file metadata in the session.
+            """
+            if "generated_files" not in self.session:
+                self.session["generated_files"] = []
+
+            self.session["generated_files"].append(file_metadata)
+            # Ensure session is saved
+            self.session.modified = True
+            
     def execute(self):
-        out_mnobis_ras = 'Mahalanobis_Raster.tif'
-        out_mess_ras = 'MESS_Raster.tif'
+        """
+        Execute the Land Similarity analysis process.
+        """
+        try:
+            print("Starting execution...")
+            value_table = self.prepare_value_table()
+            rasters = [v[0] for v in value_table]
 
-        out_mnobis_ras_path = os.path.join(self.ras_temp_path, out_mnobis_ras)
-        out_mess_ras_path = os.path.join(self.ras_temp_path, out_mess_ras)
+            print(f"Raster files to be processed: {rasters}")
 
-        if not os.path.exists(self.ras_temp_path):
-            os.makedirs(self.ras_temp_path)
+            # === Extract base path from the first raster ===
+            raster_base_path = None
+            if rasters:
+                first_raster_path = rasters[0]
+                path_parts = Path(first_raster_path).parts
+                if len(path_parts) >= 3:
+                    raster_base_path = str(Path(*path_parts[:3]))  # Top 3 directory levels
+                else:
+                    raster_base_path = str(Path(first_raster_path).parent)  # Fallback
 
-        # Save the input points as a shapefile (in_fc_pt)
-        json_file = os.path.join(self.ras_temp_path, 'in_point.json')
-        with open(json_file, 'w') as the_file:
-            the_file.write(json.dumps(self.parameters['in_point'], indent=4))
-        in_fc_pt = os.path.join(self.ras_temp_path, "in_point.shp")
-
-        # Load input GeoDataFrame from the JSON file
-        gdf = gpd.read_file(json_file)
-
-        print("Input GeoDataFrame:")
-        print(gdf.head())
-
-        # Prepare value table and validate rasters
-        value_table = self.prepare_value_table(self.parameters)
-        print("Prepared Value Table:")
-        print(value_table)
-
-        if not value_table:
-            raise ValueError("No raster files provided in the parameters.")
-
-        # Reproject points to the CRS of the first raster
-        first_raster_path = list(value_table)[0][0]
-        with rasterio.open(first_raster_path) as src:
-            raster_crs = src.crs
+                print(f"Raster base path extracted: {raster_base_path}")
+            else:
+                print("No raster files found for similarity analysis.")
+            gdf = gpd.read_file(json.dumps(self.parameters.get('in_point')))
+            raster_crs = rasterio.open(rasters[0]).crs
             print(f"Raster CRS: {raster_crs}")
             gdf = self.reproject_points(gdf, raster_crs)
 
-        # Save the reprojected points as a shapefile
-        gdf.to_file(in_fc_pt)
+            in_fc_pt = os.path.join(self.ras_temp_path, "input_points.shp")
+            print(f"Saving reprojected points to: {in_fc_pt}")
+            gdf.to_file(in_fc_pt)
 
-        # Handle optional extent for clipping
-        if 'out_extent' in self.parameters.keys():
-            if not isinstance(self.parameters['out_extent'], OrderedDict):
-                in_fc = self.parameters['out_extent']
-            else:
-                json_file = os.path.join(self.ras_temp_path, 'extent.json')
-                with open(json_file, 'w') as the_file:
-                    the_file.write(json.dumps(self.parameters['out_extent'], indent=4))
+            print("Sampling rasters...")
+            sample_shapefile_path = os.path.join(self.ras_temp_path, "temp_sample.shp")
+            self.sample_rasters(rasters, in_fc_pt, sample_shapefile_path)
+            print(f"Sampled data saved to: {sample_shapefile_path}")
 
-                in_fc = os.path.join(self.ras_temp_path, "extent.shp")
-                extent_gdf = gpd.read_file(json_file)
-                extent_gdf.to_file(in_fc)
-        else:
-            in_fc = None
+            # Define paths for DBF and CSV
+            sample_dbf_path = os.path.join(self.ras_temp_path, "temp_sample.dbf")
+            sample_csv_path = os.path.join(self.ras_temp_path, "temp.csv")
 
-        # Create value samples
-        try:
-            self.createValueSample(self.parameters, in_fc_pt, self.ras_temp_path, in_fc, extent=None)
+            # Write the DBF file to a CSV
+            self.write_csv_from_dbf(sample_dbf_path, sample_csv_path)
+
+            temp_csv_path = os.path.join(self.ras_temp_path, "temp.csv")
+            if not os.path.exists(temp_csv_path):
+                raise FileNotFoundError(f"temp.csv not found: {temp_csv_path}")
+
+            print("Calling similarity_analysis...")
+            similarity_analysis(len(rasters), self.ras_temp_path, rasters)
+
+            mnobis_file = os.path.join(self.ras_temp_path, 'MahalanobisDist_Quantiles.tif')
+            mess_file = os.path.join(self.ras_temp_path, 'MESS_Quantiles.tif')
+            print(f"Checking output files: {mnobis_file}, {mess_file}")
+            workspace_path = os.getcwd().replace("\\", "/")
+            media_dir = os.path.join(workspace_path, "media")
+
+            def generate_relative_path(file_path):
+                if os.path.exists(file_path):
+                    rel_path = os.path.relpath(file_path, media_dir).replace("\\", "/")
+                    return f"/media/{rel_path}"
+                print(f"File not found: {file_path}")
+                return None
+
+            result_relative_mnobis_ras_url = generate_relative_path(mnobis_file)
+            result_relative_mess_ras_url = generate_relative_path(mess_file)
+
+            if result_relative_mnobis_ras_url:
+                self.store_metadata_in_session({
+                    "file_path": result_relative_mnobis_ras_url,
+                    "country": raster_base_path,
+                    "created_at": now().isoformat(),
+                    "description": "Mahalanobis Distance raster file",
+                    "title":self.parameters.get('description')+" Mahalanobis",
+                })
+
+            if result_relative_mess_ras_url:
+                self.store_metadata_in_session({
+                    "file_path": result_relative_mess_ras_url,
+                    "country": raster_base_path,
+                    "created_at": now().isoformat(),
+                    "description": "MESS raster file",
+                    "title":self.parameters.get('description')+" MESS",
+                })
+
+            self.cleanup_intermediate_files(keep_files=[mnobis_file, mess_file])
+            return {
+                "Mahalanobis": result_relative_mnobis_ras_url,
+                "MESS": result_relative_mess_ras_url
+            }
         except Exception as e:
-            print(f"Error creating value sample: {e}")
-            return None, None
+            print(f"Error during execution: {e}")
+            return None
+        
+    def cleanup_intermediate_files(self, keep_files=None):
+        """
+        Delete all files in self.ras_temp_path except those explicitly listed in keep_files.
 
-        # Perform similarity analysis (Mahalanobis and MESS) using the correct file paths
-        try:
-            # Extract the actual file paths from the value table
-            file_paths = [paths[0] for paths in value_table]
-            
-            # Pass the correct file paths to similarity_analysis
-            similarity_analysis(self.get_value_table_count(self.parameters), self.ras_temp_path, file_paths)
-        except Exception as e:
-            print(f"Error in similarity_analysis: {e}")
-            return None, None
+        Parameters:
+            keep_files (list[str]): List of absolute file paths that should be preserved.
+        """
+        if keep_files is None:
+            keep_files = []
 
-        # Prepare paths for the Mahalanobis and MESS results
-        mnobis_file = os.path.join(self.ras_temp_path, 'MahalanobisDist.tif')
-        mess_file = os.path.join(self.ras_temp_path, 'MESS.tif')
-        workspace_path = os.getcwd().replace("\\", "/")
-        media_dir = os.path.join(workspace_path, "media")
+        keep_set = {os.path.abspath(p) for p in keep_files if p}
+        base_dir = os.path.abspath(self.ras_temp_path)
 
-        # Get the relative paths for the result files
-        if os.path.exists(mnobis_file):
-            mnobis_ras = mnobis_file
-            relative_mnobis_ras_path = os.path.relpath(mnobis_ras, media_dir)
-            relative_mnobis_ras_path = relative_mnobis_ras_path.replace("\\", "/")
-            result_relative_mnobis_ras_url = f"/media/{relative_mnobis_ras_path}"
-        else:
-            result_relative_mnobis_ras_url = None
-
-        if os.path.exists(mess_file):
-            mess_ras = mess_file
-            relative_mess_ras_path = os.path.relpath(mess_ras, media_dir)
-            relative_mess_ras_path = relative_mess_ras_path.replace("\\", "/")
-            result_relative_mess_ras_url = f"/media/{relative_mess_ras_path}"
-        else:
-            result_relative_mess_ras_url = None
-
-        return result_relative_mnobis_ras_url, result_relative_mess_ras_url
-
-
-    def write_csv_from_dbf(self, in_dbf, out_csv):
-        with open(out_csv, 'w', newline='') as csvf:
-            db = DBF(in_dbf)
-            writer = csv.writer(csvf)
-            writer.writerow(db.field_names)
-            for record in db:
-                writer.writerow(list(record.values()))
-        print("Finished writing to CSV")
-        print("Checking if temp.csv exists and its content:")
-        if os.path.exists(out_csv):
-            print(f"temp.csv exists: {out_csv}")
-            with open(out_csv, 'r') as f:
-                print(f.read())
-
-    def createValueSample(self, parameters, in_fc_pt, ras_temp_path, in_fc, extent):
-        in_val_raster = list(self.prepare_value_table(parameters))
-        num_rows = self.get_value_table_count(parameters)
-        first_in_raster = in_val_raster[0][0] if num_rows > 0 else None
-        sample_in_ras = []
-        equalize = False
-
-        for row_count, in_ras_file in enumerate(in_val_raster):
-            rast = in_ras_file[0]
-            if 'user' in rast.lower():
-                equalize = True
-                break
-
-        if equalize:
-            raster_infos = self.get_min_cell_size(in_val_raster)
-            in_val_raster = self.equalize_raster(raster_infos, in_val_raster, ras_temp_path)
-
-        for row_count, in_ras_file in enumerate(in_val_raster):
-            if isinstance(in_ras_file, list):
-                in_ras_file = in_ras_file[0]
-
-            i = row_count + 1
-            if extent is not None:
+        for root, dirs, files in os.walk(base_dir):
+            for fname in files:
+                fpath = os.path.abspath(os.path.join(root, fname))
+                if fpath in keep_set:
+                    continue
                 try:
-                    clip_raster = os.path.join(ras_temp_path, f"mask_{i}.tif")
-                    with rasterio.open(in_ras_file) as src:
-                        out_image, out_transform = mask(src, [extent], crop=True)
-                        out_meta = src.meta.copy()
-                        out_meta.update({"driver": "GTiff",
-                                         "height": out_image.shape[1],
-                                         "width": out_image.shape[2],
-                                         "transform": out_transform})
-                        with rasterio.open(clip_raster, "w", **out_meta) as dest:
-                            dest.write(out_image)
-                    sample_in_ras.append(clip_raster)
-                except Exception as ex:
-                    print(f"Error clipping raster: {ex}")
-                    sample_in_ras.append(in_ras_file)
-            else:
-                sample_in_ras.append(in_ras_file)
+                    os.remove(fpath)
+                    print(f"Deleted intermediate file: {fpath}")
+                except Exception as e:
+                    print(f"Could not delete {fpath}: {e}")
 
-        sample_output = os.path.join(ras_temp_path, "temp.dbf")
-        self.sample_rasters(sample_in_ras, in_fc_pt, sample_output)
+        # Optional: remove empty subdirs (but keep main ras_temp_path directory)
+        for root, dirs, _ in os.walk(base_dir, topdown=False):
+            for d in dirs:
+                dpath = os.path.join(root, d)
+                try:
+                    if not os.listdir(dpath):
+                        os.rmdir(dpath)
+                        print(f"Removed empty directory: {dpath}")
+                except Exception as e:
+                    print(f"Could not remove directory {dpath}: {e}")
 
-        # Write the DBF to CSV
-        sample_output_csv = os.path.join(ras_temp_path, "temp.csv")
-        self.write_csv_from_dbf(sample_output, sample_output_csv)
-
-    def sample_rasters(self, rasters, points, output):
-        sampled_data = []
-        sampled_points = []
-        points_gdf = gpd.read_file(points)
-        # Get the CRS from the first raster
-        with rasterio.open(rasters[0]) as src:
-            raster_crs = src.crs
-        for raster_path in rasters:
-            print(f"Processing raster: {raster_path}")
-            with rasterio.open(raster_path) as src:
-                for point in points_gdf.geometry:
-                    print(f"Processing geometry: {point}")
-                    try:
-                        row, col = src.index(point.x, point.y)
-                        sample_value = src.read(1)[row, col]
-                        print(f"Sample value: {sample_value}")
-                        sampled_data.append(sample_value)
-                        sampled_points.append(point)
-                    except IndexError:
-                        print("Error sampling geometry: Input shapes do not overlap raster.")
-                        sampled_data.append(np.nan)
-
-        if sampled_data:
-            sample_df = pd.DataFrame(sampled_data, columns=['values'])
-            sample_gdf = gpd.GeoDataFrame(sample_df, geometry=sampled_points, crs=raster_crs)
-            sample_output_dbf = output.replace('.dbf', '.shp')
-            sample_gdf.to_file(sample_output_dbf, driver='ESRI Shapefile')
-        else:
-            print("No samples obtained from the rasters. Skipping GeoDataFrame creation.")
-
-
-#sample_parameters={'selectedFiles': ['/Africa/Ethiopia/ethiopia_annual_evapo_transpiration.tif', '/Africa/Ethiopia/ethiopia_annual_precipitation.tif'], 'in_point': {"features": [{"geometry": {"coordinates": [39.777003, 8.70774], "type": "Point"}, "properties": {}, "type": "Feature"}], "type": "FeatureCollection"}, 'email': ''};
+"""
+# Sample parameters
+sample_parameters = {
+    'selectedFiles': [
+        '/Africa/Ethiopia/ethiopia_annual_evapo_transpiration.tif',
+        '/Africa/Ethiopia/ethiopia_annual_precipitation.tif'
+    ],
+    'in_point': {
+        "features": [{
+            "geometry": {"coordinates": [39.777003, 8.70774], "type": "Point"},
+            "properties": {}, "type": "Feature"
+        }],
+        "type": "FeatureCollection"
+    },
+    'email': ''
+}
 
 # Instantiate the LandSimilarity class with the sample parameters
-#land_similarity = LandSimilarity(parameters=sample_parameters)
+land_similarity = LandSimilarity(parameters=sample_parameters)
 
 # Execute the process to perform Mahalanobis distance and MESS calculations
-#mnobis_result, mess_result = land_similarity.execute()
+result = land_similarity.execute()
 
 # Output the results
-#print(f"Mahalanobis Result URL: {mnobis_result}")
-#print(f"MESS Result URL: {mess_result}")
+if result:
+    print(f"Mahalanobis Result URL: {result['Mahalanobis']}")
+    print(f"MESS Result URL: {result['MESS']}")
+else:
+    print("Execution failed.")
+"""

@@ -143,6 +143,15 @@ async function parseShapefileZipToGeoJSON(arrayBuffer) {
    Main app
 ========================= */
 $(document).ready(function () {
+
+  /* Server-provided config (API endpoints) — read from the
+     #js-config json_script block rendered by the template. */
+  const CONFIG = (function () {
+    const el = document.getElementById("js-config");
+    try { return el ? JSON.parse(el.textContent) : {}; }
+    catch (e) { console.error("Invalid #js-config JSON:", e); return {}; }
+  })();
+  const API = CONFIG.apiEndpoints || {};
   const mapSection = document.getElementById("mapSection") || document.getElementById("map-container")?.parentElement;
   const fileUploadSection = document.getElementById("fileUploadSection");
   const aoiOptionMap = document.getElementById("aoiOptionMap");
@@ -313,105 +322,6 @@ $(document).ready(function () {
   }
 
   /* =========================
-     Directory loading
-  ========================= */
-  async function fetchDirectoryContents(directoryPath) {
-    try {
-      const response = await fetch(`/api/getDirectoryContents?path=${encodeURIComponent(directoryPath)}`);
-      if (!response.ok) throw new Error("Failed to fetch directory contents");
-      return await response.json();
-    } catch (error) {
-      console.error("Error fetching directory contents:", error);
-      alert("Failed to load directory contents. Please try again later.");
-      return [];
-    }
-  }
-
-  async function fetchFolderConfigurations(folderName) {
-  const response = await fetch(`/api/getFolderConfigurations?folder=${encodeURIComponent(folderName)}`);
-  if (!response.ok) throw new Error("Failed to fetch folder configurations");
-  return await response.json(); // expects { center: [lat,lng], zoom: number }
-}
-
-async function updateMapView(folderName) {
-  if (!map) return;
-  const { center, zoom } = await fetchFolderConfigurations(folderName);
-  map.setView(center, zoom);
-}
-
-
-  function sanitizeFilePath(filePath) {
-    return filePath.replace(/[^a-zA-Z0-9]/g, "_");
-  }
-
-  async function displayDirectoryContents(directoryContents, parentElement, directoryPath) {
-    const ul = document.createElement("ul");
-    ul.classList.add("list-group");
-
-    directoryContents.forEach((item) => {
-      const li = document.createElement("li");
-      li.classList.add("list-group-item");
-
-      if (item.type === "directory") {
-        li.classList.add("folder");
-        li.innerHTML = `<i class="fas fa-caret-right folder-icon mr-2"></i><i class="fas fa-folder mr-2"></i>${item.name}`;
-        li.style.cursor = "pointer";
-
-        li.addEventListener("click", async (event) => {
-          event.stopPropagation();
-          if (!li.dataset.loaded) {
-            const sub = await fetchDirectoryContents(`${directoryPath}/${item.name}`);
-            displayDirectoryContents(sub, li.querySelector(".folder-content"), `${directoryPath}/${item.name}`);
-            li.dataset.loaded = true;
-          }
-          li.classList.toggle("expanded");
-          const folderContent = li.querySelector(".folder-content");
-          folderContent.style.display = folderContent.style.display === "block" ? "none" : "block";
-          const folderIcon = li.querySelector(".folder-icon");
-          folderIcon.classList.toggle("fa-caret-right");
-          folderIcon.classList.toggle("fa-caret-down");
-           try {
-                await updateMapView(item.name);
-            } catch (e) {
-                console.error("updateMapView failed:", e);
-            }
-        });
-
-        const folderContent = document.createElement("div");
-        folderContent.classList.add("folder-content");
-        li.appendChild(folderContent);
-      } else if (item.type === "file") {
-        li.classList.add("file");
-        li.style.height = "30px";
-
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.value = `${directoryPath}/${item.name}`;
-        checkbox.classList.add("mr-2");
-
-        checkbox.addEventListener("click", (event) => event.stopPropagation());
-        checkbox.addEventListener("change", () => {
-          if (checkbox.checked) addSelectedFile(checkbox.value, item.name, item.min_val, item.max_val);
-          else removeSelectedFileByFilePath(checkbox.value);
-        });
-
-        const label = document.createElement("label");
-        label.classList.add("file-name");
-        label.textContent = item.name;
-        label.style.lineHeight = "30px";
-        label.setAttribute("title", item.name);
-
-        li.appendChild(checkbox);
-        li.appendChild(label);
-      }
-
-      ul.appendChild(li);
-    });
-
-    parentElement.appendChild(ul);
-  }
-
-  /* =========================
      Raster table logic (yours)
   ========================= */
   let rasterCounter = 0;
@@ -420,7 +330,7 @@ async function updateMapView(folderName) {
   function addSelectedFile(filePath, fileName, minVal, maxVal) {
     rasterCounter++;
     const rasterId = rasterCounter;
-    const sanitized = sanitizeFilePath(filePath);
+    const sanitized = DirectoryBrowser.sanitizeFilePath(filePath);
 
     const tableBody = document.getElementById("rasterTableBody");
     const row = document.createElement("tr");
@@ -577,7 +487,7 @@ async function updateMapView(folderName) {
 
     selectedRows.forEach((row) => {
       const originalFilePath = row.getAttribute("data-original-filepath");
-      const key = sanitizeFilePath(originalFilePath);
+      const key = DirectoryBrowser.sanitizeFilePath(originalFilePath);
 
       const minValInput = row.querySelector(`input[name="rasterParameters[${key}][min_val]"]`);
       const maxValInput = row.querySelector(`input[name="rasterParameters[${key}][max_val]"]`);
@@ -632,7 +542,7 @@ async function updateMapView(folderName) {
     // Submit
 
     $('#progressModal').modal('show');
-    fetch("/api/processLandSuitability", {
+    fetch(API.processLandSuitability, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -669,11 +579,22 @@ async function updateMapView(folderName) {
   const submitBtn = document.getElementById("submitBtn");
   if (submitBtn) submitBtn.addEventListener("click", validateForm);
 
-  // Load tree
+  // Load the raster directory tree via the shared module.
   if (fileListElement) {
-    fetchDirectoryContents("/")
-      .then((contents) => displayDirectoryContents(contents, fileListElement, ""))
-      .catch((e) => console.error("Error displaying root directory contents:", e));
+    DirectoryBrowser.render({
+      container: fileListElement,
+      rootPath: "",
+      urls: {
+        directoryContents: API.directoryContents,
+        folderConfigurations: API.folderConfigurations,
+      },
+      onFolderOpen: (folderName, folderConfig) => {
+        if (map && folderConfig) map.setView(folderConfig.center, folderConfig.zoom);
+      },
+      onFileSelect: (filePath, item) =>
+        addSelectedFile(filePath, item.name, item.min_val, item.max_val),
+      onFileDeselect: (filePath) => removeSelectedFileByFilePath(filePath),
+    });
   }
 
   // Initialize map immediately (since map is always present in HTML)

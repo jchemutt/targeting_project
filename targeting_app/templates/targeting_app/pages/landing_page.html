@@ -1,0 +1,115 @@
+{% extends 'targeting_app/base.html' %}
+{% load static %}
+
+{% block title %}Land Targeting Tools{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/landing_page.css' %}">
+{% endblock %}
+
+{% block content %}
+
+{# ---------- Hero ---------- #}
+<section class="landing-hero">
+    <div class="container">
+        <p class="section-eyebrow">Alliance of Bioversity International &amp; CIAT</p>
+        <h1>Land Targeting Tools</h1>
+        <p class="hero-tagline">
+            Web-based spatial analysis to identify <em>where</em> to target agricultural
+            and environmental interventions — combining biophysical and socio-economic
+            data into clear, map-based results.
+        </p>
+        <div class="hero-actions">
+            <a href="#tools" class="btn btn-primary btn-lg">Explore the tools</a>
+            <a href="{% url 'resources' %}" class="btn btn-outline-secondary btn-lg">
+                <i class="fas fa-play-circle"></i> Watch the intro
+            </a>
+        </div>
+    </div>
+</section>
+
+{# ---------- Tools ---------- #}
+<section id="tools" class="landing-section">
+    <div class="container">
+        <div class="section-head text-center mb-5">
+            <p class="section-eyebrow">Three tools, one workflow</p>
+            <h2>Choose a tool to get started</h2>
+            <p class="mx-auto">Each tool answers a different targeting question — pick the one that matches yours.</p>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4 mb-4" data-aos="fade-up">
+                <a class="tool-card" href="{% url 'suitability' %}">
+                    <span class="tool-card-icon"><i class="fas fa-bullseye"></i></span>
+                    <h3>Land Suitability</h3>
+                    <p>Match suitability criteria against spatial databases to map where conditions fit a given crop or system.</p>
+                    <span class="tool-card-link">Open tool <i class="fas fa-arrow-right"></i></span>
+                </a>
+            </div>
+
+            <div class="col-md-4 mb-4" data-aos="fade-up" data-aos-delay="100">
+                <a class="tool-card" href="{% url 'similarity' %}">
+                    <span class="tool-card-icon"><i class="fas fa-clone"></i></span>
+                    <h3>Land Similarity</h3>
+                    <p>Find areas that are socio-ecologically similar to sites you already know perform well.</p>
+                    <span class="tool-card-link">Open tool <i class="fas fa-arrow-right"></i></span>
+                </a>
+            </div>
+
+            <div class="col-md-4 mb-4" data-aos="fade-up" data-aos-delay="200">
+                <a class="tool-card" href="{% url 'statistics' %}">
+                    <span class="tool-card-icon"><i class="fas fa-chart-bar"></i></span>
+                    <h3>Land Statistics</h3>
+                    <p>Compute zonal statistics — area, mean and more — over your suitability and similarity results.</p>
+                    <span class="tool-card-link">Open tool <i class="fas fa-arrow-right"></i></span>
+                </a>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# ---------- Intro video ---------- #}
+<section class="landing-section tint">
+    <div class="container">
+        <div class="section-head text-center mb-5">
+            <p class="section-eyebrow">Get started</p>
+            <h2>See the tools in action</h2>
+            <p class="mx-auto">A short walkthrough of how to load data, run an analysis and read the results.</p>
+        </div>
+
+        <div class="landing-video">
+            <div class="embed-responsive embed-responsive-16by9">
+                <iframe class="embed-responsive-item"
+                        src="https://www.youtube-nocookie.com/embed/z1SPW8aCWuA"
+                        title="Land Targeting Tools — intro video"
+                        referrerpolicy="strict-origin-when-cross-origin"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowfullscreen></iframe>
+            </div>
+        </div>
+
+        <div class="text-center mt-4">
+            <a href="{% url 'resources' %}" class="btn btn-primary">
+                Browse all resources <i class="fas fa-arrow-right"></i>
+            </a>
+        </div>
+    </div>
+</section>
+
+{# ---------- About ---------- #}
+<section class="landing-section">
+    <div class="container">
+        <div class="section-head text-center">
+            <p class="section-eyebrow">About</p>
+            <h2>What the toolbox does</h2>
+            <p class="about-text mx-auto">
+                The Land Targeting Tools are a set of web-based spatial tools for research
+                and planning. They bring biophysical and socio-economic layers together so
+                interventions can be targeted with evidence rather than guesswork — and the
+                results come back as maps you can download and share.
+            </p>
+        </div>
+    </div>
+</section>
+
+{% endblock %}

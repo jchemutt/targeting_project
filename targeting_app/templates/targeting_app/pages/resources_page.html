@@ -1,0 +1,90 @@
+{% extends 'targeting_app/base.html' %}
+{% load static %}
+
+{% block title %}Resources — Land Targeting Tools{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/resources_page.css' %}">
+{% endblock %}
+
+{% block content %}
+
+<header class="page-hero">
+    <div class="container">
+        <h1>Resources</h1>
+        <p class="lead">
+            Tutorials, guides and worked examples to help you get the most out of
+            the Land Targeting Tools.
+        </p>
+    </div>
+</header>
+
+{# ---------- Video tutorial ---------- #}
+<section class="resource-section">
+    <div class="container">
+        <h2 class="resource-heading">Video tutorial</h2>
+        <p class="resource-intro">
+            A walkthrough of the Land Targeting Tools — loading data, running an
+            analysis and interpreting the map-based results.
+        </p>
+
+        <div class="video-wrap">
+            <div class="embed-responsive embed-responsive-16by9">
+                <iframe class="embed-responsive-item"
+                        src="https://www.youtube-nocookie.com/embed/z1SPW8aCWuA"
+                        title="Land Targeting Tools — video tutorial"
+                        referrerpolicy="strict-origin-when-cross-origin"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowfullscreen></iframe>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# ---------- Guides & case studies ---------- #}
+<section class="resource-section">
+    <div class="container">
+        <h2 class="resource-heading">Guides &amp; case studies</h2>
+        <p class="resource-intro">
+            Step-by-step documents showing the tools applied to real targeting questions.
+        </p>
+
+        <div class="row">
+            <div class="col-md-6 col-lg-5 mb-4" data-aos="fade-up">
+                {% with guide_pdf='targeting_app/docs/ghana-silvopastoral-targeting-exercise.pdf' %}
+                <article class="resource-card">
+                    <a class="resource-card-cover" href="{% static guide_pdf %}"
+                       target="_blank" rel="noopener">
+                        <img src="{% static 'targeting_app/images/resources/ghana-guide-cover.png' %}"
+                             alt="Cover of the Ghana silvopastoral targeting guide">
+                        <span class="resource-card-badge">PDF &middot; Case study</span>
+                    </a>
+                    <div class="resource-card-body">
+                        <h3 class="resource-card-title">
+                            Spatial Targeting of Silvopastoral Systems in Ghana
+                        </h3>
+                        <p class="resource-card-text">
+                            A worked example using the Land Targeting Tools to find where,
+                            near Tamale, smallholder small-ruminant silvopastoral systems
+                            could be piloted — combining accessibility, labour, livestock,
+                            forage, tree and land-degradation layers.
+                        </p>
+                    </div>
+                    <div class="resource-card-actions">
+                        <a class="btn btn-primary btn-sm" href="{% static guide_pdf %}"
+                           target="_blank" rel="noopener">
+                            <i class="fas fa-eye"></i> View guide
+                        </a>
+                        <a class="btn btn-outline-secondary btn-sm" href="{% static guide_pdf %}"
+                           download="Ghana-Silvopastoral-Targeting-Exercise.pdf">
+                            <i class="fas fa-download"></i> Download
+                        </a>
+                    </div>
+                </article>
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+</section>
+
+{% endblock %}

@@ -1,0 +1,166 @@
+/* ============================================================
+   DirectoryBrowser — shared raster directory/file tree.
+   Used by the Land Suitability and Land Similarity pages.
+
+   This file is page-agnostic and contains NO Django template
+   syntax. All server-derived values (API URLs) are passed in by
+   the caller, which reads them from the #js-config json_script
+   block rendered by the template.
+
+   Usage:
+     DirectoryBrowser.render({
+       container: <DOM element>,
+       rootPath: "",
+       urls: { directoryContents, folderConfigurations },
+       onFolderOpen:  (folderName, folderConfig) => {},   // optional
+       onFileSelect:  (filePath, item) => {},
+       onFileDeselect:(filePath) => {},
+     });
+   ============================================================ */
+(function (window) {
+  "use strict";
+
+  /** Turn an arbitrary file path into a safe id/selector token. */
+  function sanitizeFilePath(filePath) {
+    return filePath.replace(/[^a-zA-Z0-9]/g, "_");
+  }
+
+  async function fetchJSON(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status}): ${url}`);
+    }
+    return response.json();
+  }
+
+  /** Fetch the contents of one directory. Returns [] on failure. */
+  async function fetchDirectoryContents(baseUrl, directoryPath) {
+    try {
+      return await fetchJSON(`${baseUrl}?path=${encodeURIComponent(directoryPath)}`);
+    } catch (error) {
+      console.error("Error fetching directory contents:", error);
+      alert("Failed to load directory contents. Please try again later.");
+      return [];
+    }
+  }
+
+  /** Fetch the map center/zoom configuration for a folder. */
+  async function fetchFolderConfigurations(baseUrl, folderName) {
+    return fetchJSON(`${baseUrl}?folder=${encodeURIComponent(folderName)}`);
+  }
+
+  function renderFolder(li, item, directoryPath, opts) {
+    const childPath = `${directoryPath}/${item.name}`;
+    li.classList.add("folder");
+    li.style.cursor = "pointer";
+    li.innerHTML =
+      '<i class="fas fa-caret-right folder-icon mr-2"></i>' +
+      '<i class="fas fa-folder mr-2"></i>' +
+      item.name;
+
+    const folderContent = document.createElement("div");
+    folderContent.classList.add("folder-content");
+    li.appendChild(folderContent);
+
+    li.addEventListener("click", async (event) => {
+      event.stopPropagation();
+
+      if (!li.dataset.loaded) {
+        const sub = await fetchDirectoryContents(opts.urls.directoryContents, childPath);
+        buildTree(sub, folderContent, childPath, opts);
+        li.dataset.loaded = "true";
+      }
+
+      li.classList.toggle("expanded");
+      folderContent.style.display =
+        folderContent.style.display === "block" ? "none" : "block";
+
+      const icon = li.querySelector(".folder-icon");
+      icon.classList.toggle("fa-caret-right");
+      icon.classList.toggle("fa-caret-down");
+
+      if (typeof opts.onFolderOpen === "function" && opts.urls.folderConfigurations) {
+        try {
+          const config = await fetchFolderConfigurations(
+            opts.urls.folderConfigurations,
+            item.name
+          );
+          opts.onFolderOpen(item.name, config);
+        } catch (e) {
+          console.error("Folder configuration lookup failed:", e);
+        }
+      }
+    });
+  }
+
+  function renderFile(li, item, directoryPath, opts) {
+    const filePath = `${directoryPath}/${item.name}`;
+    li.classList.add("file");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = filePath;
+    checkbox.classList.add("mr-2");
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        if (typeof opts.onFileSelect === "function") opts.onFileSelect(filePath, item);
+      } else if (typeof opts.onFileDeselect === "function") {
+        opts.onFileDeselect(filePath);
+      }
+    });
+
+    const label = document.createElement("label");
+    label.classList.add("file-name");
+    label.textContent = item.name;
+    label.setAttribute("title", item.name);
+
+    li.appendChild(checkbox);
+    li.appendChild(label);
+  }
+
+  function buildTree(contents, parentElement, directoryPath, opts) {
+    const ul = document.createElement("ul");
+    ul.classList.add("list-group");
+
+    contents.forEach((item) => {
+      const li = document.createElement("li");
+      li.classList.add("list-group-item");
+
+      if (item.type === "directory") {
+        renderFolder(li, item, directoryPath, opts);
+      } else if (item.type === "file") {
+        renderFile(li, item, directoryPath, opts);
+      }
+      ul.appendChild(li);
+    });
+
+    parentElement.appendChild(ul);
+  }
+
+  /** Render the directory tree into a container element. */
+  async function render(opts) {
+    if (!opts || !opts.container) {
+      console.error("DirectoryBrowser.render: 'container' is required.");
+      return;
+    }
+    if (!opts.urls || !opts.urls.directoryContents) {
+      console.error("DirectoryBrowser.render: 'urls.directoryContents' is required.");
+      return;
+    }
+
+    const rootPath = opts.rootPath || "";
+    const contents = await fetchDirectoryContents(
+      opts.urls.directoryContents,
+      rootPath || "/"
+    );
+    buildTree(contents, opts.container, rootPath, opts);
+  }
+
+  window.DirectoryBrowser = {
+    render: render,
+    sanitizeFilePath: sanitizeFilePath,
+    fetchDirectoryContents: fetchDirectoryContents,
+    fetchFolderConfigurations: fetchFolderConfigurations,
+  };
+})(window);

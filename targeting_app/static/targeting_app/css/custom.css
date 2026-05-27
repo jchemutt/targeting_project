@@ -1,61 +1,21 @@
 /*--------------------------------------------------------------
-# Intro Section - Hero Banner
---------------------------------------------------------------*/
- #intro {
-            padding-top: 80px;
-        }
-        @media (max-width: 768px) {
-            #intro {
-                padding-top: 100px;
-            }
-        }
-
-        /* ✅ Fix for Cropped Carousel Images */
-        .carousel-item img {
-            width: 100%;
-            height: auto; /* Keeps the original aspect ratio */
-            max-height: 500px; /* Adjust to ensure full visibility */
-            object-fit: contain; /* Ensures the whole image fits */
-            object-position: center; /* Centers the image */
-        }
-
-        @media (max-width: 768px) {
-            .carousel-item img {
-                max-height: 400px; /* Adjust height for smaller screens */
-            }
-        }
-		
-		.carousel-caption h5, 
-.carousel-caption p {
-    color: #000 !important; /* Dark text for contrast */
-}
-
-.carousel-caption {
-    background: rgba(255, 255, 255, 0.7); /* Light transparent background */
-    padding: 10px;
-    border-radius: 5px;
-    display: inline-block;
-}
-
-
-
-/*--------------------------------------------------------------
 # Footer
 --------------------------------------------------------------*/
 #footer {
     background: #fff;
-    padding: 30px 0;
-    color: #333;
+    border-top: 1px solid var(--tt-border);
+    padding: 28px 0;
+    color: var(--tt-muted);
     font-size: 14px;
     text-align: center;
 }
 
 #footer .footer-links a {
-    color: #666;
+    color: var(--tt-muted);
     padding-left: 10px;
-    transition: 0.3s;
+    transition: color 0.2s ease;
 }
 
 #footer .footer-links a:hover {
-    color: #1dc8cd;
+    color: var(--tt-green);
 }

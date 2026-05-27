@@ -1,0 +1,111 @@
+/* ============================================================
+   Resources page
+   ============================================================ */
+
+.resource-section {
+    padding: 46px 15px;
+}
+
+.resource-section + .resource-section {
+    border-top: 1px solid var(--tt-border);
+}
+
+.resource-heading {
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: var(--tt-ink);
+    margin-bottom: 0;
+}
+
+.resource-heading::after {
+    content: "";
+    display: block;
+    width: 48px;
+    height: 3px;
+    background: var(--tt-green);
+    border-radius: 2px;
+    margin-top: 8px;
+}
+
+.resource-intro {
+    color: var(--tt-muted);
+    max-width: 680px;
+    margin: 14px 0 24px;
+}
+
+/* --- Video --- */
+.video-wrap {
+    max-width: 860px;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+}
+
+/* --- Resource cards --- */
+.resource-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #fff;
+    border: 1px solid var(--tt-border);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.resource-card:hover {
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+    transform: translateY(-3px);
+}
+
+.resource-card-cover {
+    position: relative;
+    display: block;
+    line-height: 0;
+}
+
+.resource-card-cover img {
+    width: 100%;
+    display: block;
+    border-bottom: 1px solid var(--tt-border);
+}
+
+.resource-card-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 4px;
+}
+
+.resource-card-body {
+    padding: 16px 18px 4px;
+    flex-grow: 1;
+}
+
+.resource-card-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--tt-ink);
+    margin-bottom: 8px;
+}
+
+.resource-card-text {
+    color: var(--tt-muted);
+    font-size: 0.9rem;
+    line-height: 1.55;
+    margin-bottom: 0;
+}
+
+.resource-card-actions {
+    padding: 14px 18px 18px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
