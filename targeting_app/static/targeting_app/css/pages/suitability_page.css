@@ -1,0 +1,439 @@
+/* ============================================================
+   Land Suitability — GIS workspace layout (Phase 1)
+   A full-height, panelled workspace built around the map.
+   All element IDs are preserved so appv1.js keeps working.
+   ============================================================ */
+
+.suit-workspace {
+    height: calc(100vh - 76px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--tt-green-tint);
+}
+
+/* --- Workspace: layers | (map + table) | side --- */
+.suit-main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+}
+
+.panel-layers { flex: none; width: 232px; }
+
+.suit-center {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.panel-map   { flex: 1 1 auto; min-height: 0; }
+.panel-table { flex: 0 0 auto; height: 230px; }
+.panel-side  { flex: none; width: 320px; }
+
+/* --- Panel shell --- */
+.suit-panel {
+    background: #fff;
+    border: 1px solid var(--tt-border);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.panel-head {
+    flex: none;
+    padding: 9px 12px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--tt-ink);
+    background: #f7f9f7;
+    border-bottom: 1px solid var(--tt-border);
+}
+
+.panel-head i {
+    color: var(--tt-green-dark);
+    margin-right: 6px;
+}
+
+.panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 10px 12px;
+}
+
+/* --- Map fills its panel --- */
+.panel-map .map-shell {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+.suit-workspace #map-container {
+    width: 100%;
+    height: 100%;
+}
+
+/* --- Map layers control (overlay on the main map) --- */
+.map-layers-control {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 500;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid var(--tt-border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    width: 240px;
+    max-height: calc(100% - 40px);
+    overflow-y: auto;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+    font-size: 12px;
+    color: var(--tt-ink);
+}
+
+.map-layers-head {
+    font-weight: 700;
+    color: var(--tt-ink);
+    padding: 2px 0 7px;
+    border-bottom: 1px solid var(--tt-border);
+    margin-bottom: 6px;
+}
+
+.map-layers-head i {
+    color: var(--tt-green-dark);
+    margin-right: 6px;
+}
+
+.map-layer-item {
+    padding: 6px 0;
+}
+
+.map-layer-item + .map-layer-item {
+    border-top: 1px dashed var(--tt-border);
+}
+
+.map-layer-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.map-layer-name {
+    flex: 1;
+    min-width: 0;
+    word-break: break-all;
+    line-height: 1.3;
+}
+
+.ml-eye {
+    background: transparent;
+    border: 0;
+    color: var(--tt-green-dark);
+    padding: 0 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.ml-eye:hover { color: var(--tt-green); }
+
+.ml-info {
+    flex: none;
+    background: transparent;
+    border: 0;
+    color: var(--tt-muted);
+    padding: 0 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.ml-info:hover { color: var(--tt-green); }
+
+/* Info button in the data-layers tree */
+.file-info-btn {
+    flex: none;
+    align-self: flex-start;
+    background: transparent;
+    border: 0;
+    color: var(--tt-muted);
+    padding: 0 2px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.file-info-btn:hover { color: var(--tt-green); }
+
+/* Metadata modal table */
+.meta-table th {
+    width: 42%;
+    font-weight: 600;
+    color: var(--tt-muted);
+    font-size: 12px;
+    border-top: 0;
+    padding: 4px 8px;
+}
+
+.meta-table td {
+    font-size: 12px;
+    color: var(--tt-ink);
+    word-break: break-word;
+    border-top: 0;
+    padding: 4px 8px;
+}
+
+.map-layer-opacity {
+    width: 100%;
+    margin-top: 5px;
+}
+
+/* Per-layer legend: viridis ramp + value range */
+.map-layer-legend {
+    height: 9px;
+    margin-top: 7px;
+    border-radius: 2px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: linear-gradient(to right,
+        #440154, #414487, #2a788e, #22a884, #7ad151, #fde725);
+}
+
+.map-layer-legend.is-result {
+    background: linear-gradient(to right,
+        #d73027, #f46d43, #fee08b, #d9ef8b, #66bd63, #1a9850);
+}
+
+.map-layer-legend-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--tt-muted);
+    margin-top: 2px;
+}
+
+/* --- Left: directory browser scrolls inside the panel body --- */
+.suit-workspace #fileList {
+    max-height: none;
+    overflow: visible;
+}
+
+/* --- Criteria cards (trapezoid suitability editor per layer) --- */
+.criteria-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.criteria-card {
+    border: 1px solid var(--tt-border);
+    border-radius: 6px;
+    padding: 8px 10px 10px;
+    background: #fff;
+}
+
+.criteria-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.criteria-group-badge {
+    flex: none;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--tt-green-dark);
+    background: var(--tt-green-tint);
+    border: 1px solid var(--tt-border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    white-space: nowrap;
+}
+
+.criteria-card-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--tt-ink);
+    word-break: break-all;
+    line-height: 1.25;
+}
+
+.criteria-card-actions {
+    flex: none;
+    white-space: nowrap;
+}
+
+.criteria-card-actions .btn-link {
+    padding: 0 4px;
+    color: var(--tt-muted);
+}
+
+.criteria-card-actions .btn-link.text-danger { color: #c0392b; }
+
+/* Trapezoid slider */
+.trap-slider {
+    position: relative;
+    height: 46px;
+    margin: 10px 8px 6px;
+    touch-action: none;
+}
+
+.trap-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.trap-shape {
+    fill: rgba(0, 153, 51, 0.18);
+    stroke: var(--tt-green);
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
+}
+
+.trap-baseline {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-bottom: 1px solid var(--tt-border);
+}
+
+.trap-handle {
+    position: absolute;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--tt-muted);
+    transform: translateX(-50%);
+    cursor: ew-resize;
+    touch-action: none;
+    z-index: 2;
+}
+
+.trap-handle[data-role="min_val"],
+.trap-handle[data-role="max_val"] { bottom: -6px; }
+
+.trap-handle.is-opt {
+    background: var(--tt-green);
+    border-color: var(--tt-green-dark);
+    top: -6px;
+}
+
+.trap-handle.dragging { box-shadow: 0 0 0 4px rgba(0, 153, 51, 0.18); }
+.trap-handle:focus { outline: none; box-shadow: 0 0 0 3px rgba(0, 153, 51, 0.35); }
+
+/* Numeric fields under the slider (the source of truth) */
+.trap-fields {
+    display: flex;
+    gap: 6px;
+}
+
+.trap-fields label {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 10px;
+    color: var(--tt-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.trap-fields input {
+    font-size: 12px;
+    padding: 2px 4px;
+    height: 26px;
+    text-align: center;
+}
+
+.trap-combine {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--tt-muted);
+}
+
+.trap-combine label {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+/* --- Left panel: show full layer names (wrap, don't truncate) --- */
+.suit-workspace .file {
+    height: auto;
+    min-height: 28px;
+    align-items: flex-start;
+    padding: 3px 0;
+}
+
+.suit-workspace .file-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    display: block;
+    white-space: normal;
+    overflow: hidden;
+    word-break: break-all;
+    line-height: 1.35;
+    padding-top: 1px;
+}
+
+/* --- Right: stacked sections --- */
+.suit-section + .suit-section {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--tt-border);
+}
+
+.suit-section-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--tt-ink);
+    margin-bottom: 8px;
+}
+
+/* --- Stack everything on small screens --- */
+@media (max-width: 991.98px) {
+    .suit-workspace {
+        height: auto;
+        overflow: visible;
+    }
+
+    .suit-main {
+        display: block;
+        padding: 10px;
+    }
+
+    .suit-center {
+        display: block;
+    }
+
+    .suit-panel {
+        margin-bottom: 10px;
+    }
+
+    .panel-map .map-shell {
+        flex: none;
+        height: 360px;
+    }
+
+    .suit-workspace #map-container {
+        height: 360px;
+    }
+
+    .panel-body {
+        max-height: 440px;
+    }
+}

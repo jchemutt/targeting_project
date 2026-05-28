@@ -166,6 +166,7 @@ $(document).ready(function () {
   // --- Leaflet state ---
   let map = null;
   let resultUrl = "";
+  let currentResultKey = null;
   let popupMap = null;
   let drawnItems = new L.FeatureGroup();
 
@@ -188,9 +189,31 @@ $(document).ready(function () {
     // Create map
     map = L.map("map-container", { preferCanvas: true }).setView([0, 0], 2);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+    // Dedicated pane for input-raster previews so they always sit above the
+    // basemap (even after switching basemaps) but below drawn AOI vectors.
+    map.createPane("rasterOverlays");
+    map.getPane("rasterOverlays").style.zIndex = 350;
+
+    // Basemaps (Esri layers need no API key, just attribution).
+    const baseLayers = {
+      Street: L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors",
+        maxZoom: 19,
+      }),
+      Satellite: L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        { attribution: "Imagery &copy; Esri", maxZoom: 19 }
+      ),
+      Topographic: L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+        { attribution: "Tiles &copy; Esri", maxZoom: 19 }
+      ),
+    };
+    baseLayers.Street.addTo(map);
+    L.control.layers(baseLayers, null, { position: "bottomleft", collapsed: true }).addTo(map);
+
+    // Scale bar (metric).
+    L.control.scale({ position: "bottomleft", imperial: false }).addTo(map);
 
     map.addLayer(drawnItems);
 
@@ -322,138 +345,558 @@ $(document).ready(function () {
   }
 
   /* =========================
-     Raster table logic (yours)
+     Map layers — preview selected input rasters on the main map
+     via the server-side tile endpoint (scales to large rasters).
+  ========================= */
+  const MapLayers = (function () {
+    const active = new Map();   // filePath -> entry { fileName, leafletLayer?, bounds?, loading?, error?, visible, opacity }
+    let firstAddDone = false;
+
+    function controlEl() {
+      return document.getElementById("mapLayersControl");
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g,
+        c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    function fmtVal(v) {
+      if (v === null || v === undefined || !isFinite(v)) return "—";
+      const a = Math.abs(v);
+      if (a >= 1000) return Math.round(v).toLocaleString();
+      if (a >= 1) return String(Math.round(v * 100) / 100);
+      if (a === 0) return "0";
+      return Number(v).toPrecision(2);
+    }
+
+    async function addLayer(layerKey, fileName, opts) {
+      if (!map) return;
+      if (active.has(layerKey)) return;
+      if (!API.tileRaster || !API.rasterMeta) return;
+
+      opts = opts || {};
+      const isResult = opts.source === "result";
+      const srcParam = isResult ? "&source=result" : "";
+      const opacity = typeof opts.opacity === "number" ? opts.opacity : 0.7;
+
+      // Optimistic entry so the control shows a spinner while we set up.
+      active.set(layerKey, {
+        fileName, loading: true, visible: true, opacity, isResult,
+      });
+      render();
+
+      try {
+        // 1. Raster bounds — reuse a pre-fetched meta if the caller passed
+        //    one, otherwise fetch it (small JSON; lets us fitBounds without
+        //    downloading the whole file).
+        let meta = opts.meta;
+        if (!meta) {
+          const metaResp = await fetch(`${API.rasterMeta}?path=${encodeURIComponent(layerKey)}${srcParam}`);
+          if (!metaResp.ok) throw new Error(`metadata HTTP ${metaResp.status}`);
+          meta = await metaResp.json();
+        }
+        if (!meta || !meta.bounds) throw new Error("no bounds in metadata response");
+
+        // The user may have removed the layer while we were waiting.
+        if (!active.has(layerKey)) return;
+
+        // 2. Set up a Leaflet tile layer pointing at the tile endpoint.
+        //    The browser fetches only the 256x256 tiles it needs for the
+        //    current view; nothing is loaded into memory client-side.
+        const tileUrl = `${API.tileRaster}?path=${encodeURIComponent(layerKey)}${srcParam}`;
+        const bounds = L.latLngBounds(
+          [meta.bounds[1], meta.bounds[0]],   // SW (south, west)
+          [meta.bounds[3], meta.bounds[2]]    // NE (north, east)
+        );
+        const layerOpts = {
+          opacity,
+          bounds,
+          tileSize: 256,
+          noWrap: true,
+          pane: "rasterOverlays",
+        };
+        // Coarse rasters (e.g. climate layers) have a low native zoom. Cap
+        // native tile requests at that zoom and let Leaflet upscale for
+        // deeper zooms, so they stay visible instead of requesting blank
+        // over-zoom tiles.
+        if (typeof meta.maxzoom === "number") {
+          layerOpts.maxNativeZoom = meta.maxzoom;
+        }
+        const leafletLayer = L.tileLayer(tileUrl, layerOpts);
+        leafletLayer.addTo(map);
+
+        active.set(layerKey, {
+          fileName, leafletLayer, bounds,
+          range: Array.isArray(meta.range) ? meta.range : null,
+          loading: false, visible: true, opacity, isResult,
+        });
+
+        // Zoom to the first layer added; always zoom to a freshly-run result.
+        if (!firstAddDone || isResult) {
+          try { map.fitBounds(bounds); } catch (_) {}
+          firstAddDone = true;
+        }
+      } catch (err) {
+        console.error("Layer preview failed for", layerKey, err);
+        if (!active.has(layerKey)) return;
+        active.set(layerKey, {
+          fileName, loading: false, error: true, visible: false, opacity, isResult,
+        });
+      }
+      render();
+    }
+
+    function removeLayer(filePath) {
+      const entry = active.get(filePath);
+      if (!entry) return;
+      if (entry.leafletLayer) {
+        try { map.removeLayer(entry.leafletLayer); } catch (_) {}
+      }
+      active.delete(filePath);
+      if (active.size === 0) firstAddDone = false;
+      render();
+    }
+
+    function toggleVisibility(filePath) {
+      const entry = active.get(filePath);
+      if (!entry || !entry.leafletLayer) return;
+      if (entry.visible) {
+        try { map.removeLayer(entry.leafletLayer); } catch (_) {}
+        entry.visible = false;
+      } else {
+        entry.leafletLayer.addTo(map);
+        entry.visible = true;
+      }
+      render();
+    }
+
+    function setOpacity(filePath, opacity) {
+      const entry = active.get(filePath);
+      if (!entry || !entry.leafletLayer) return;
+      entry.opacity = opacity;
+      entry.leafletLayer.setOpacity(opacity);
+    }
+
+    function render() {
+      const el = controlEl();
+      if (!el) return;
+      if (active.size === 0) {
+        el.innerHTML = "";
+        el.style.display = "none";
+        return;
+      }
+      el.style.display = "";
+
+      const parts = [
+        '<div class="map-layers-head"><i class="fas fa-layer-group"></i>Map layers</div>',
+      ];
+      active.forEach((entry, filePath) => {
+        const fpAttr = encodeURIComponent(filePath);
+        const safeName = escapeHtml(entry.fileName);
+        let statusHtml;
+        if (entry.loading) {
+          statusHtml = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>';
+        } else if (entry.error) {
+          statusHtml = '<i class="fas fa-exclamation-circle text-danger" title="Failed to load"></i>';
+        } else {
+          const icon = entry.visible ? "fa-eye" : "fa-eye-slash";
+          statusHtml = `<button type="button" class="ml-eye" data-fp="${fpAttr}" title="Show / hide on map"><i class="fas ${icon}"></i></button>`;
+        }
+
+        let legendHtml = "";
+        if (!entry.loading && !entry.error && entry.range) {
+          const legCls = entry.isResult ? "map-layer-legend is-result" : "map-layer-legend";
+          const loLabel = entry.isResult ? "Low" : escapeHtml(fmtVal(entry.range[0]));
+          const hiLabel = entry.isResult ? "High" : escapeHtml(fmtVal(entry.range[1]));
+          legendHtml = `
+            <div class="${legCls}"></div>
+            <div class="map-layer-legend-labels">
+              <span>${loLabel}</span>
+              <span>${hiLabel}</span>
+            </div>`;
+        }
+
+        parts.push(`
+          <div class="map-layer-item">
+            <div class="map-layer-row">
+              ${statusHtml}
+              <span class="map-layer-name" title="${safeName}">${safeName}</span>
+              <button type="button" class="ml-info" data-fp="${fpAttr}" title="Layer metadata"><i class="fas fa-info-circle"></i></button>
+            </div>
+            <input type="range" min="0" max="1" step="0.05" value="${entry.opacity}"
+                   class="map-layer-opacity" data-fp="${fpAttr}"
+                   ${entry.leafletLayer ? "" : "disabled"}
+                   title="Opacity">
+            ${legendHtml}
+          </div>
+        `);
+      });
+      el.innerHTML = parts.join("");
+
+      el.querySelectorAll(".ml-eye").forEach(b => {
+        b.addEventListener("click", () => toggleVisibility(decodeURIComponent(b.dataset.fp)));
+      });
+      el.querySelectorAll(".map-layer-opacity").forEach(s => {
+        s.addEventListener("input", () => setOpacity(decodeURIComponent(s.dataset.fp), parseFloat(s.value)));
+      });
+      el.querySelectorAll(".ml-info").forEach(b => {
+        b.addEventListener("click", () => {
+          const fp = decodeURIComponent(b.dataset.fp);
+          const ent = active.get(fp);
+          showLayerMetadata(fp, ent ? ent.fileName : fp,
+                            ent && ent.isResult ? "result" : "data");
+        });
+      });
+    }
+
+    return { addLayer, removeLayer };
+  })();
+
+  /* =========================
+     Trapezoid criteria slider
+     Visual editor for the suitability membership function. The four named
+     inputs (min_val / opti_from / opti_to / max_val) remain the source of
+     truth; the slider reads and writes them and always keeps
+     min_val <= opti_from <= opti_to <= max_val.
+  ========================= */
+  function escHtml(s) {
+    return String(s).replace(/[&<>"']/g,
+      c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  /* =========================
+     Layer metadata viewer
+  ========================= */
+  function metaNum(v) {
+    if (v === null || v === undefined || v === "" || isNaN(v)) return "—";
+    return Number(v).toLocaleString(undefined, { maximumFractionDigits: 3 });
+  }
+
+  function renderMetaTable(m) {
+    const rows = [];
+    const add = (k, v) => {
+      if (v !== null && v !== undefined && v !== "") rows.push([k, v]);
+    };
+    add("Driver", m.driver);
+    add("Dimensions", (m.width && m.height) ? `${m.width} × ${m.height} px` : null);
+    add("Bands", m.bands);
+    add("Data type", m.dtype);
+    add("CRS", m.epsg ? `EPSG:${m.epsg}` : m.crs);
+    if (m.resolution) add("Resolution", `${metaNum(m.resolution[0])} × ${metaNum(m.resolution[1])}`);
+    if (m.bounds_wgs84) {
+      const w = m.bounds_wgs84;
+      add("Extent (WGS84)", `${metaNum(w[0])}, ${metaNum(w[1])} → ${metaNum(w[2])}, ${metaNum(w[3])}`);
+    }
+    add("NoData", m.nodata);
+    add("Units", m.units);
+    add("Band description", m.band_description);
+    add("Compression", m.compression);
+    if (m.overview_levels && m.overview_levels.length) add("Overviews", m.overview_levels.join(", "));
+    if (m.statistics) {
+      add("Min / Max", `${metaNum(m.statistics.minimum)} / ${metaNum(m.statistics.maximum)}`);
+      add("Mean / Std", `${metaNum(m.statistics.mean)} / ${metaNum(m.statistics.stddev)}`);
+    }
+
+    let html = '<table class="table table-sm meta-table"><tbody>';
+    rows.forEach(([k, v]) => {
+      html += `<tr><th>${escHtml(k)}</th><td>${escHtml(String(v))}</td></tr>`;
+    });
+    html += "</tbody></table>";
+
+    const desc = Object.assign({}, m.descriptive || {}, m.curated || {});
+    const descKeys = Object.keys(desc);
+    if (descKeys.length) {
+      html += '<h6 class="mt-3 mb-1">Description &amp; source</h6><table class="table table-sm meta-table"><tbody>';
+      descKeys.forEach((k) => {
+        html += `<tr><th>${escHtml(k)}</th><td>${escHtml(String(desc[k]))}</td></tr>`;
+      });
+      html += "</tbody></table>";
+    } else {
+      html += '<p class="text-muted small mt-2 mb-0">No descriptive metadata sidecar found for this layer (showing auto-derived technical metadata only).</p>';
+    }
+    return html;
+  }
+
+  async function showLayerMetadata(path, name, source) {
+    const titleEl = document.getElementById("layerMetaTitle");
+    const bodyEl = document.getElementById("layerMetaBody");
+    const dlEl = document.getElementById("layerMetaDownload");
+    if (!bodyEl || !API.layerMetadata) return;
+    if (titleEl) titleEl.textContent = name || "Layer metadata";
+    const src = source === "result" ? "&source=result" : "";
+    if (dlEl) {
+      dlEl.href = `${API.layerMetadata}?path=${encodeURIComponent(path)}${src}&download=1`;
+    }
+    bodyEl.innerHTML = '<div class="text-muted">Loading metadata…</div>';
+    try { $("#layerMetaModal").modal("show"); } catch (_) {}
+    try {
+      const resp = await fetch(`${API.layerMetadata}?path=${encodeURIComponent(path)}${src}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const m = await resp.json();
+      if (m.error) throw new Error(m.error);
+      bodyEl.innerHTML = renderMetaTable(m);
+    } catch (err) {
+      bodyEl.innerHTML = `<div class="text-danger">Could not load metadata: ${escHtml(err.message || String(err))}</div>`;
+    }
+  }
+
+  const TrapSlider = (function () {
+    const ORDER = ["min_val", "opti_from", "opti_to", "max_val"];
+
+    function init(cardEl, axisMin, axisMax) {
+      if (!(axisMax > axisMin)) axisMax = axisMin + 1;
+      const range = axisMax - axisMin;
+      const dec = range >= 100 ? 0 : range >= 10 ? 1 : range >= 1 ? 2 : 4;
+      const round = (v) => { const f = Math.pow(10, dec); return Math.round(v * f) / f; };
+
+      const slider = cardEl.querySelector(".trap-slider");
+      const poly = cardEl.querySelector(".trap-shape");
+      const handles = {};
+      const inputs = {};
+      ORDER.forEach((role) => {
+        handles[role] = cardEl.querySelector(`.trap-handle[data-role="${role}"]`);
+        inputs[role] = cardEl.querySelector(`input[name*="[${role}]"]`);
+      });
+
+      const getVal = (role) => parseFloat(inputs[role].value);
+      const toPct = (v) => Math.max(0, Math.min(100, ((v - axisMin) / range) * 100));
+
+      function clampRole(role, v) {
+        v = Math.max(axisMin, Math.min(axisMax, v));
+        const i = ORDER.indexOf(role);
+        if (i > 0) { const lo = getVal(ORDER[i - 1]); if (isFinite(lo)) v = Math.max(v, lo); }
+        if (i < 3) { const hi = getVal(ORDER[i + 1]); if (isFinite(hi)) v = Math.min(v, hi); }
+        return v;
+      }
+
+      function redraw() {
+        ORDER.forEach((role) => {
+          const v = getVal(role);
+          if (isFinite(v)) handles[role].style.left = toPct(v) + "%";
+        });
+        const mn = toPct(getVal("min_val"));
+        const of = toPct(getVal("opti_from"));
+        const ot = toPct(getVal("opti_to"));
+        const mx = toPct(getVal("max_val"));
+        poly.setAttribute("points", `${mn},100 ${of},0 ${ot},0 ${mx},100`);
+      }
+
+      function setRole(role, v) {
+        v = clampRole(role, round(v));
+        inputs[role].value = v;
+        redraw();
+      }
+
+      ORDER.forEach((role) => {
+        inputs[role].addEventListener("change", () => {
+          const v = parseFloat(inputs[role].value);
+          if (!isFinite(v)) { redraw(); return; }
+          setRole(role, v);
+        });
+
+        const h = handles[role];
+        h.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          try { h.setPointerCapture(e.pointerId); } catch (_) {}
+          h.classList.add("dragging");
+        });
+        h.addEventListener("pointermove", (e) => {
+          if (!h.hasPointerCapture || !h.hasPointerCapture(e.pointerId)) return;
+          const r = slider.getBoundingClientRect();
+          if (!r.width) return;
+          setRole(role, axisMin + ((e.clientX - r.left) / r.width) * range);
+        });
+        const release = (e) => {
+          try { h.releasePointerCapture(e.pointerId); } catch (_) {}
+          h.classList.remove("dragging");
+        };
+        h.addEventListener("pointerup", release);
+        h.addEventListener("pointercancel", release);
+        h.addEventListener("keydown", (e) => {
+          const step = range / 100 || 1;
+          if (e.key === "ArrowLeft" || e.key === "ArrowDown") { setRole(role, getVal(role) - step); e.preventDefault(); }
+          else if (e.key === "ArrowRight" || e.key === "ArrowUp") { setRole(role, getVal(role) + step); e.preventDefault(); }
+        });
+      });
+
+      redraw();
+    }
+
+    return { init };
+  })();
+
+  /* =========================
+     Criteria cards (suitability trapezoid per layer)
   ========================= */
   let rasterCounter = 0;
   let groupRows = {};
 
-  function addSelectedFile(filePath, fileName, minVal, maxVal) {
+  async function addSelectedFile(filePath, fileName, minVal, maxVal) {
     rasterCounter++;
     const rasterId = rasterCounter;
     const sanitized = DirectoryBrowser.sanitizeFilePath(filePath);
+    const cards = document.getElementById("rasterCards");
 
-    const tableBody = document.getElementById("rasterTableBody");
-    const row = document.createElement("tr");
-    row.setAttribute("data-raster-id", rasterId);
-    row.setAttribute("data-original-filepath", filePath);
+    // Prefer the raster's own statistics (auto, from the file) for the
+    // trapezoid axis; fall back to the values supplied by the directory
+    // listing if the raster has no usable stats.
+    let aMin = parseFloat(minVal);
+    let aMax = parseFloat(maxVal);
+    let fetchedMeta = null;
+    if (API.rasterMeta) {
+      try {
+        const resp = await fetch(`${API.rasterMeta}?path=${encodeURIComponent(filePath)}`);
+        if (resp.ok) {
+          fetchedMeta = await resp.json();
+          const dr = fetchedMeta && fetchedMeta.data_range;
+          if (Array.isArray(dr) && isFinite(dr[0]) && isFinite(dr[1]) && dr[1] > dr[0]) {
+            aMin = dr[0];
+            aMax = dr[1];
+          }
+        }
+      } catch (_) { /* keep the listing values */ }
+    }
+    if (!isFinite(aMin)) aMin = 0;
+    if (!isFinite(aMax) || aMax <= aMin) aMax = aMin + 100;
+    const span = aMax - aMin;
+    const dec = span >= 100 ? 0 : span >= 10 ? 1 : span >= 1 ? 2 : 4;
+    const round = (v) => { const f = Math.pow(10, dec); return Math.round(v * f) / f; };
+    const optFrom = round(aMin + span / 3);
+    const optTo = round(aMin + (2 * span) / 3);
+    const safeName = escHtml(fileName);
 
-    row.innerHTML = `
-      <td class="group-cell"></td>
-      <td>${fileName}</td>
-      <td><input type="text" class="form-control form-control-sm" name="rasterParameters[${sanitized}][min_val]" value="${minVal}" onchange="validateMinVal(this, ${minVal})"></td>
-      <td><input type="text" class="form-control form-control-sm" name="rasterParameters[${sanitized}][opti_from]" placeholder="Optimal From" onchange="validateOptiFrom(this)"></td>
-      <td><input type="text" class="form-control form-control-sm" name="rasterParameters[${sanitized}][opti_to]" placeholder="Optimal To" onchange="validateOptiTo(this)"></td>
-      <td><input type="text" class="form-control form-control-sm" name="rasterParameters[${sanitized}][max_val]" value="${maxVal}" onchange="validateMaxVal(this, ${maxVal})"></td>
-      <td>
-        <select id="combine_${sanitized}" name="rasterParameters[${sanitized}][combine]" class="form-control form-control-sm">
+    const card = document.createElement("div");
+    card.className = "criteria-card";
+    card.setAttribute("data-raster-id", rasterId);
+    card.setAttribute("data-original-filepath", filePath);
+    card.innerHTML = `
+      <div class="criteria-card-head">
+        <span class="criteria-group-badge"></span>
+        <span class="criteria-card-name" title="${safeName}">${safeName}</span>
+        <span class="criteria-card-actions">
+          <button type="button" class="btn btn-link btn-sm move-up-btn" title="Move up"><i class="fas fa-arrow-up"></i></button>
+          <button type="button" class="btn btn-link btn-sm move-down-btn" title="Move down"><i class="fas fa-arrow-down"></i></button>
+          <button type="button" class="btn btn-link btn-sm remove-btn text-danger" title="Remove"><i class="fas fa-trash"></i></button>
+        </span>
+      </div>
+      <div class="trap-slider" title="Drag the handles to set the suitability trapezoid">
+        <svg class="trap-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polygon class="trap-shape" points=""></polygon>
+        </svg>
+        <div class="trap-baseline"></div>
+        <div class="trap-handle" data-role="min_val" tabindex="0" title="Minimum — suitability 0 below this"></div>
+        <div class="trap-handle is-opt" data-role="opti_from" tabindex="0" title="Optimal from — full suitability"></div>
+        <div class="trap-handle is-opt" data-role="opti_to" tabindex="0" title="Optimal to — full suitability"></div>
+        <div class="trap-handle" data-role="max_val" tabindex="0" title="Maximum — suitability 0 above this"></div>
+      </div>
+      <div class="trap-fields">
+        <label>Min<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][min_val]" value="${aMin}"></label>
+        <label>Opt. from<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][opti_from]" value="${optFrom}"></label>
+        <label>Opt. to<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][opti_to]" value="${optTo}"></label>
+        <label>Max<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][max_val]" value="${aMax}"></label>
+      </div>
+      <div class="trap-combine">
+        <label><input type="checkbox" class="combine-check"> Combine with previous group</label>
+        <select id="combine_${sanitized}" name="rasterParameters[${sanitized}][combine]" class="combine-select" hidden>
           <option value="Yes">Yes</option>
-          <option value="No">No</option>
+          <option value="No" selected>No</option>
         </select>
-      </td>
-      <td>
-        <button type="button" class="btn btn-secondary btn-sm move-up-btn"><i class="fas fa-arrow-up"></i></button>
-        <button type="button" class="btn btn-secondary btn-sm move-down-btn"><i class="fas fa-arrow-down"></i></button>
-        <button type="button" class="btn btn-danger btn-sm remove-btn"><i class="fas fa-trash"></i></button>
-      </td>
+      </div>
     `;
+    cards.appendChild(card);
 
-    tableBody.appendChild(row);
+    card.querySelector(".remove-btn").addEventListener("click", () => removeSelectedFile(rasterId));
+    card.querySelector(".move-up-btn").addEventListener("click", () => moveCard(card, "up"));
+    card.querySelector(".move-down-btn").addEventListener("click", () => moveCard(card, "down"));
 
-    row.querySelector(".remove-btn").addEventListener("click", () => removeSelectedFile(rasterId));
-    row.querySelector(".move-up-btn").addEventListener("click", () => moveRow(row, "up"));
-    row.querySelector(".move-down-btn").addEventListener("click", () => moveRow(row, "down"));
+    const combineCheck = card.querySelector(".combine-check");
+    const combineSelect = card.querySelector(".combine-select");
+    combineCheck.addEventListener("change", () => {
+      combineSelect.value = combineCheck.checked ? "Yes" : "No";
+      updateCombineOptions();
+    });
 
-    const combineSelect = row.querySelector(`#combine_${sanitized}`);
-    combineSelect.addEventListener("change", updateCombineOptions);
-
+    TrapSlider.init(card, aMin, aMax);
     updateCombineOptions();
+
+    // Preview this layer on the main map (async — non-blocking).
+    // Preview this layer on the main map (async — non-blocking). Reuse the
+    // metadata we already fetched so we don't request it twice.
+    MapLayers.addLayer(filePath, fileName, fetchedMeta ? { meta: fetchedMeta } : undefined);
   }
 
   function removeSelectedFile(rasterId) {
-    const row = document.querySelector(`tr[data-raster-id="${rasterId}"]`);
-    if (!row) return;
+    const card = document.querySelector(`.criteria-card[data-raster-id="${rasterId}"]`);
+    if (!card) return;
 
-    const originalFilePath = row.getAttribute("data-original-filepath");
-    row.remove();
+    const originalFilePath = card.getAttribute("data-original-filepath");
+    card.remove();
 
     const checkbox = document.querySelector(`input[type="checkbox"][value="${originalFilePath}"]`);
     if (checkbox) checkbox.checked = false;
 
+    // Remove the corresponding preview from the map.
+    MapLayers.removeLayer(originalFilePath);
+
     updateCombineOptions();
   }
 
-  function moveRow(row, direction) {
-    const tableBody = row.parentNode;
+  function moveCard(card, direction) {
+    const container = card.parentNode;
     if (direction === "up") {
-      const prevRow = row.previousElementSibling;
-      if (prevRow) tableBody.insertBefore(row, prevRow);
+      const prev = card.previousElementSibling;
+      if (prev) container.insertBefore(card, prev);
     } else if (direction === "down") {
-      const nextRow = row.nextElementSibling;
-      if (nextRow) tableBody.insertBefore(nextRow.nextElementSibling, row);
+      const next = card.nextElementSibling;
+      if (next) container.insertBefore(next, card);
     }
     updateCombineOptions();
   }
 
   function updateCombineOptions() {
-    const tableBody = document.getElementById("rasterTableBody");
-    const rows = Array.from(tableBody.querySelectorAll("tr"));
+    const container = document.getElementById("rasterCards");
+    if (!container) return;
+    const cards = Array.from(container.querySelectorAll(".criteria-card"));
     let currentGroup = 1;
     groupRows = {};
 
-    rows.forEach((row, index) => {
-      const combineSelect = row.querySelector('select[name*="[combine]"]');
+    cards.forEach((card, index) => {
+      const combineSelect = card.querySelector('select[name*="[combine]"]');
+      const combineCheck = card.querySelector(".combine-check");
 
       if (index === 0) {
         combineSelect.value = "No";
-        combineSelect.disabled = true;
-        row.setAttribute("data-group", currentGroup);
+        if (combineCheck) { combineCheck.checked = false; combineCheck.disabled = true; }
+        card.setAttribute("data-group", currentGroup);
       } else {
-        combineSelect.disabled = false;
-        const prevRow = rows[index - 1];
-        const prevGroup = parseInt(prevRow.getAttribute("data-group"), 10);
-
-        if (combineSelect.value === "Yes") row.setAttribute("data-group", prevGroup);
+        if (combineCheck) combineCheck.disabled = false;
+        const prevGroup = parseInt(cards[index - 1].getAttribute("data-group"), 10);
+        if (combineSelect.value === "Yes") card.setAttribute("data-group", prevGroup);
         else {
           currentGroup++;
-          row.setAttribute("data-group", currentGroup);
+          card.setAttribute("data-group", currentGroup);
         }
       }
 
-      const groupNumber = parseInt(row.getAttribute("data-group"), 10);
+      const groupNumber = parseInt(card.getAttribute("data-group"), 10);
       groupRows[groupNumber] = groupRows[groupNumber] || [];
-      groupRows[groupNumber].push(row);
+      groupRows[groupNumber].push(card);
 
-      const groupCell = row.querySelector(".group-cell");
-      if (groupCell) {
-        if (index === 0 || row.getAttribute("data-group") !== rows[index - 1].getAttribute("data-group")) {
-          groupCell.innerHTML = `<button type="button" class="btn btn-link collapse-btn" data-group="${groupNumber}">[-]</button> Group ${groupNumber}`;
-          groupCell.querySelector(".collapse-btn").addEventListener("click", toggleGroup);
-        } else {
-          groupCell.innerHTML = "";
-        }
-      }
-    });
-  }
-
-  function toggleGroup(event) {
-    event.stopPropagation();
-    const groupNumber = event.target.getAttribute("data-group");
-    const isCollapsed = event.target.textContent === "[+]";
-    event.target.textContent = isCollapsed ? "[-]" : "[+]";
-
-    groupRows[groupNumber].forEach((row) => {
-      if (row !== event.target.closest("tr")) {
-        row.style.display = isCollapsed ? "" : "none";
-      }
+      const badge = card.querySelector(".criteria-group-badge");
+      if (badge) badge.textContent = "Group " + groupNumber;
     });
   }
 
   function removeSelectedFileByFilePath(filePath) {
-    const row = document.querySelector(`tr[data-original-filepath="${filePath}"]`);
-    if (row) {
-      row.remove();
+    const card = document.querySelector(`.criteria-card[data-original-filepath="${filePath}"]`);
+    if (card) {
+      card.remove();
       updateCombineOptions();
     }
+    // Remove the corresponding preview from the map (covers the
+    // user un-checking a file in the directory tree).
+    MapLayers.removeLayer(filePath);
   }
 
   /* =========================
@@ -471,7 +914,7 @@ $(document).ready(function () {
       return false;
     }
 
-    const selectedRows = document.querySelectorAll("#rasterTableBody tr");
+    const selectedRows = document.querySelectorAll("#rasterCards .criteria-card");
     if (selectedRows.length < 1) {
       alert("Please select at least one file.");
       return false;
@@ -559,6 +1002,15 @@ $(document).ready(function () {
               $('#downloadLink2').attr('href', resultUrl);
               $('#resultSection').show();
 
+              // Show the result on the main map (tiled, like the inputs) so it
+              // can be toggled against them. Replace any previous result.
+              if (data.result_path) {
+                if (currentResultKey) MapLayers.removeLayer(currentResultKey);
+                currentResultKey = data.result_path;
+                MapLayers.addLayer(data.result_path, "Suitability result",
+                                   { source: "result", opacity: 0.85 });
+              }
+
               $('html, body').animate({
                 scrollTop: $('#resultSection').offset().top
               }, 500);
@@ -594,6 +1046,7 @@ $(document).ready(function () {
       onFileSelect: (filePath, item) =>
         addSelectedFile(filePath, item.name, item.min_val, item.max_val),
       onFileDeselect: (filePath) => removeSelectedFileByFilePath(filePath),
+      onFileInfo: (filePath, item) => showLayerMetadata(filePath, item.name, "data"),
     });
   }
 

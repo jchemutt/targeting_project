@@ -117,6 +117,19 @@
 
     li.appendChild(checkbox);
     li.appendChild(label);
+
+    if (typeof opts.onFileInfo === "function") {
+      const infoBtn = document.createElement("button");
+      infoBtn.type = "button";
+      infoBtn.className = "file-info-btn";
+      infoBtn.title = "Layer metadata";
+      infoBtn.innerHTML = '<i class="fas fa-info-circle"></i>';
+      infoBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        opts.onFileInfo(filePath, item);
+      });
+      li.appendChild(infoBtn);
+    }
   }
 
   function buildTree(contents, parentElement, directoryPath, opts) {
