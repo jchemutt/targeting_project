@@ -437,3 +437,59 @@
         max-height: 440px;
     }
 }
+
+/* ===== Click-to-inspect popup (shared across all three tool pages) ===== */
+.leaflet-popup.inspect-popup .leaflet-popup-content {
+    margin: 10px 12px;
+    min-width: 180px;
+}
+
+.inspect-coords {
+    font-size: 10px;
+    color: var(--tt-muted);
+    margin-bottom: 6px;
+    font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+.inspect-table {
+    width: 100%;
+    font-size: 11px;
+    border-collapse: collapse;
+}
+
+.inspect-table td {
+    padding: 3px 4px;
+    border-bottom: 1px solid var(--tt-border);
+    vertical-align: top;
+}
+
+.inspect-table tr:last-child td {
+    border-bottom: none;
+}
+
+.inspect-name {
+    color: var(--tt-ink);
+    max-width: 170px;
+    word-break: break-word;
+    line-height: 1.25;
+}
+
+.inspect-value {
+    text-align: right;
+    font-weight: 600;
+    color: var(--tt-green-dark);
+    white-space: nowrap;
+    padding-left: 10px !important;
+}
+
+.inspect-value.is-empty {
+    color: var(--tt-muted);
+    font-weight: 400;
+    font-style: italic;
+}
+
+.inspect-empty {
+    font-size: 11px;
+    color: var(--tt-muted);
+    font-style: italic;
+}

@@ -7,6 +7,7 @@ called by the frontend to browse data, run analyses and manage the session.
 
 import json
 import logging
+import math
 import os
 
 from django.conf import settings
@@ -18,7 +19,7 @@ from django.http import (
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 import geojson
 
@@ -58,6 +59,12 @@ def _js_config():
             'processLandSuitability': reverse('process_land_suitability'),
             'processLandSimilarity': reverse('process_land_similarity'),
             'processStatistics': reverse('process_statistics'),
+            'queryPoint': reverse('query_point'),
+        },
+        'pages': {
+            'statistics': reverse('statistics'),
+            'suitability': reverse('suitability'),
+            'similarity': reverse('similarity'),
         },
     }
 
@@ -386,6 +393,83 @@ def raster_meta(request):
     except Exception as exc:
         logger.exception('raster_meta failed for %s', full_path)
         return JsonResponse({'error': str(exc)}, status=500)
+
+
+@require_GET
+def query_point(request):
+    """Sample a raster at a single WGS84 coordinate.
+
+    Returns ``{'value': <float>}`` for a valid pixel, ``{'value': None,
+    'nodata': True}`` for a masked / nodata pixel, or ``{'value': None,
+    'out_of_bounds': True}`` if the coordinate is outside the raster.
+    """
+    full_path, _is_result = _resolve_tiled_source(request)
+    if full_path is None:
+        return JsonResponse({'error': 'Raster not found or path invalid'},
+                            status=404)
+    try:
+        lat = float(request.GET.get('lat'))
+        lng = float(request.GET.get('lng'))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'lat and lng query params required'},
+                            status=400)
+
+    import rasterio
+    from rasterio.crs import CRS as _CRS
+    from rasterio.warp import transform as _rio_transform
+    from rasterio.windows import Window as _Window
+    wgs84 = _CRS.from_epsg(4326)
+
+    try:
+        with rasterio.open(full_path) as src:
+            x, y = lng, lat
+
+            # Reproject the click point into the raster's CRS if they differ.
+            # Compare CRS objects directly to avoid quirks with ``to_epsg()``.
+            if src.crs is not None and src.crs != wgs84:
+                try:
+                    xs, ys = _rio_transform(wgs84, src.crs, [lng], [lat])
+                    x, y = xs[0], ys[0]
+                except Exception:
+                    logger.exception('CRS reprojection failed for %s', full_path)
+                    # Continue with raw lat/lng; sample() may still work if the
+                    # CRS difference is cosmetic (e.g. an unparsed WKT).
+
+            # Map the (x, y) coordinate to a pixel (row, col). ``src.index``
+            # works in the raster's CRS and always returns ints (or arrays of
+            # ints in newer rasterio); we coerce to ints for safety.
+            try:
+                row, col = src.index(x, y)
+                row, col = int(row), int(col)
+            except Exception:
+                return JsonResponse({'value': None, 'out_of_bounds': True})
+
+            if row < 0 or col < 0 or row >= src.height or col >= src.width:
+                return JsonResponse({'value': None, 'out_of_bounds': True})
+
+            # Read just that one pixel from band 1.
+            arr = src.read(1, window=_Window(col, row, 1, 1))
+            if arr.size == 0:
+                return JsonResponse({'value': None, 'out_of_bounds': True})
+            val = float(arr.flat[0])
+
+            # Treat declared nodata or NaN/inf as 'no data' (NaN-safe).
+            nd = src.nodata
+            if nd is not None:
+                try:
+                    if isinstance(nd, float) and math.isnan(nd):
+                        if math.isnan(val):
+                            return JsonResponse({'value': None, 'nodata': True})
+                    elif val == nd:
+                        return JsonResponse({'value': None, 'nodata': True})
+                except (TypeError, ValueError):
+                    pass
+            if not math.isfinite(val):
+                return JsonResponse({'value': None, 'nodata': True})
+            return JsonResponse({'value': val})
+    except Exception:
+        logger.exception('query_point failed for %s', full_path)
+        return JsonResponse({'value': None, 'out_of_bounds': True})
 
 
 def _parse_esri_metadata(full_path: str) -> dict:

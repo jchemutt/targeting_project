@@ -16,6 +16,7 @@ urlpatterns = [
     path('api/getUserFiles', views.get_user_files, name='get_user_files'),
     path('api/manageSession/<str:action>', views.manage_session, name='manage_session'),
     path('api/processStatistics', views.process_statistics, name='process_statistics'),
+    path('api/queryPoint', views.query_point, name='query_point'),
     path('api/getReferenceLayers', views.get_reference_layers, name='get_reference_layers'),
     path('api/serveRaster', views.serve_raster, name='serve_raster'),
     path('api/tile/<int:z>/<int:x>/<int:y>.png', views.tile_raster, name='tile_raster'),

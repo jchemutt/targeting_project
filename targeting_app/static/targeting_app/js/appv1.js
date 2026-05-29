@@ -251,6 +251,21 @@ $(document).ready(function () {
       clearAOI(drawnItems, aoiInput, aoiStatusEl);
     });
 
+    // Click any pixel to inspect raster values. Suppress while a draw / edit
+    // / delete handler is active (otherwise polygon clicks would also fire).
+    let inspectSuppressed = false;
+    map.on('draw:drawstart draw:editstart draw:deletestart', () => { inspectSuppressed = true; });
+    map.on('draw:drawstop  draw:editstop  draw:deletestop',  () => { inspectSuppressed = false; });
+    map.on('click', async (e) => {
+      if (inspectSuppressed) return;
+      const results = await MapLayers.queryAt(e.latlng);
+      if (results.length === 0) return;
+      L.popup({ maxWidth: 280, className: 'inspect-popup' })
+        .setLatLng(e.latlng)
+        .setContent(renderInspectHtml(e.latlng, results))
+        .openOn(map);
+    });
+
     // Leaflet needs a size refresh after first paint
     setTimeout(() => map.invalidateSize(true), 250);
   }
@@ -478,6 +493,38 @@ $(document).ready(function () {
       entry.leafletLayer.setOpacity(opacity);
     }
 
+    // Sample each visible non-error layer at one WGS84 point. Returns a
+    // Promise<{name, value, nodata, outOfBounds, error, isResult, range}[]>.
+    async function queryAt(latlng) {
+      if (!API.queryPoint) return [];
+      const visible = [];
+      active.forEach((entry, fp) => {
+        if (entry.visible && !entry.error && !entry.loading) {
+          visible.push({ fp, entry });
+        }
+      });
+      const fetches = visible.map(async ({ fp, entry }) => {
+        const src = entry.isResult ? '&source=result' : '';
+        try {
+          const url = `${API.queryPoint}?path=${encodeURIComponent(fp)}&lat=${latlng.lat}&lng=${latlng.lng}${src}`;
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          return {
+            name: entry.fileName,
+            value: data.value,
+            nodata: !!data.nodata,
+            outOfBounds: !!data.out_of_bounds,
+            isResult: !!entry.isResult,
+            range: entry.range,
+          };
+        } catch (err) {
+          return { name: entry.fileName, error: true };
+        }
+      });
+      return Promise.all(fetches);
+    }
+
     function render() {
       const el = controlEl();
       if (!el) return;
@@ -550,7 +597,7 @@ $(document).ready(function () {
       });
     }
 
-    return { addLayer, removeLayer };
+    return { addLayer, removeLayer, queryAt };
   })();
 
   /* =========================
@@ -563,6 +610,81 @@ $(document).ready(function () {
   function escHtml(s) {
     return String(s).replace(/[&<>"']/g,
       c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  /* =========================
+     Inspect popup helpers (click on the map to sample raster values)
+  ========================= */
+  function fmtInspectNum(v) {
+    if (v === null || v === undefined || !isFinite(v)) return "—";
+    const a = Math.abs(v);
+    if (a >= 1000) return Math.round(v).toLocaleString();
+    if (a >= 1) return String(Math.round(v * 100) / 100);
+    if (a === 0) return "0";
+    return Number(v).toPrecision(2);
+  }
+
+  function fmtInspectValue(r) {
+    if (r.error)        return { text: 'error',         cls: 'is-empty' };
+    if (r.outOfBounds)  return { text: 'out of bounds', cls: 'is-empty' };
+    if (r.nodata || r.value === null || r.value === undefined) {
+      return { text: 'no data', cls: 'is-empty' };
+    }
+    if (r.isResult && r.range && Number.isInteger(Math.round(r.value))) {
+      const cls = Math.round(r.value);
+      const lo = Math.round(r.range[0]);
+      const hi = Math.round(r.range[1]);
+      if (lo === 1 && hi === 5) {
+        // Suitability never inverts, but check anyway for safety.
+        let idx = cls - 1;
+        if (r.invert) idx = 4 - idx;
+        const levels = ['Very low', 'Low', 'Moderate', 'High', 'Very high'];
+        if (idx >= 0 && idx <= 4) {
+          return { text: `${cls} — ${levels[idx]} suitability`, cls: '' };
+        }
+      }
+      return { text: String(cls), cls: '' };
+    }
+    return { text: fmtInspectNum(r.value), cls: '' };
+  }
+
+  function renderInspectHtml(latlng, results) {
+    const coords = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
+    if (results.length === 0) {
+      return `<div class="inspect-coords">${coords}</div>` +
+             `<div class="inspect-empty">No layers visible.</div>`;
+    }
+    let rows = '';
+    results.forEach(r => {
+      const v = fmtInspectValue(r);
+      rows += `<tr>
+        <td class="inspect-name">${escHtml(r.name || '')}</td>
+        <td class="inspect-value ${v.cls}">${escHtml(v.text)}</td>
+      </tr>`;
+    });
+    return `<div class="inspect-coords">${coords}</div>
+      <table class="inspect-table"><tbody>${rows}</tbody></table>`;
+  }
+
+  /* =========================
+     Chain-workflow link (open the result in Land Statistics)
+  ========================= */
+  function renderChainLink(resultPath) {
+    let container = document.getElementById('resultChainLinks');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'resultChainLinks';
+      container.className = 'mt-2';
+      const resultSection = document.getElementById('resultSection');
+      if (resultSection) resultSection.appendChild(container);
+    }
+    const statsUrl = (CONFIG.pages && CONFIG.pages.statistics) || '/statistics';
+    const href = `${statsUrl}?file=${encodeURIComponent(resultPath)}`;
+    container.innerHTML =
+      `<a href="${href}" target="_blank" rel="noopener" class="btn btn-outline-success btn-sm btn-block">
+         <i class="fas fa-arrow-circle-right"></i> Open in Land Statistics
+         <i class="fas fa-external-link-alt" style="font-size:.75em;opacity:.7;margin-left:4px"></i>
+       </a>`;
   }
 
   /* =========================
@@ -1009,6 +1131,7 @@ $(document).ready(function () {
                 currentResultKey = data.result_path;
                 MapLayers.addLayer(data.result_path, "Suitability result",
                                    { source: "result", opacity: 0.85 });
+                renderChainLink(data.result_path);
               }
 
               $('html, body').animate({

@@ -221,6 +221,41 @@ document.addEventListener('DOMContentLoaded', function () {
       entry.leafletLayer.setOpacity(value);
     }
 
+    // Sample each visible non-error layer at a single WGS84 point. Returns
+    // a Promise<[{name, value, nodata, outOfBounds, error, legendLabels,
+    // isResult, range}]> in the order layers were added.
+    async function queryAt(latlng) {
+      if (!API.queryPoint) return [];
+      const visible = [];
+      active.forEach((entry, fp) => {
+        if (entry.visible && !entry.error && !entry.loading) {
+          visible.push({ fp, entry });
+        }
+      });
+      const fetches = visible.map(async ({ fp, entry }) => {
+        const src = entry.isResult ? '&source=result' : '';
+        try {
+          const url = `${API.queryPoint}?path=${encodeURIComponent(fp)}&lat=${latlng.lat}&lng=${latlng.lng}${src}`;
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          return {
+            name: entry.fileName,
+            value: data.value,
+            nodata: !!data.nodata,
+            outOfBounds: !!data.out_of_bounds,
+            isResult: !!entry.isResult,
+            invert: !!entry.invert,
+            legendLabels: entry.legendLabels || null,
+            range: entry.range,
+          };
+        } catch (err) {
+          return { name: entry.fileName, error: true };
+        }
+      });
+      return Promise.all(fetches);
+    }
+
     function render() {
       const el = ensure();
       if (!el) return;
@@ -290,7 +325,7 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     }
 
-    return { addLayer, removeLayer };
+    return { addLayer, removeLayer, queryAt };
   })();
 
   // ----- Map setup -----
@@ -318,6 +353,70 @@ document.addEventListener('DOMContentLoaded', function () {
     baseLayers.Street.addTo(map);
     L.control.layers(baseLayers, null, { position: "bottomleft", collapsed: true }).addTo(map);
     L.control.scale({ position: "bottomleft", imperial: false }).addTo(map);
+
+    // Click any pixel to see its value in every visible raster.
+    map.on('click', async (e) => {
+      const results = await MapLayers.queryAt(e.latlng);
+      if (results.length === 0) return;
+      L.popup({ maxWidth: 280, className: 'inspect-popup' })
+        .setLatLng(e.latlng)
+        .setContent(renderInspectHtml(e.latlng, results))
+        .openOn(map);
+    });
+  }
+
+  // ----- Inspect popup -----
+  function quantileNoun() {
+    // Pick the qualitative noun for the currently-selected result file. For
+    // the reference layer or unknown types we'll show a plain numeric value.
+    if (selectedDescription === 'Land suitability raster file') return 'suitability';
+    if (selectedDescription === 'Mahalanobis Distance raster file') return 'similarity';
+    if (selectedDescription === 'MESS raster file') return 'similarity';
+    return '';
+  }
+
+  function fmtInspectValue(r) {
+    if (r.error)        return { text: 'error',         cls: 'is-empty' };
+    if (r.outOfBounds)  return { text: 'out of bounds', cls: 'is-empty' };
+    if (r.nodata || r.value === null || r.value === undefined) {
+      return { text: 'no data', cls: 'is-empty' };
+    }
+    // Standard 1-5 quantile result with a known qualitative noun: label all
+    // five levels, flipping the order when the layer is inverted.
+    if (r.isResult && r.range && Number.isInteger(Math.round(r.value))) {
+      const cls = Math.round(r.value);
+      const lo = Math.round(r.range[0]);
+      const hi = Math.round(r.range[1]);
+      const noun = quantileNoun();
+      if (lo === 1 && hi === 5 && noun) {
+        let idx = cls - 1;
+        if (r.invert) idx = 4 - idx;
+        const levels = ['Very low', 'Low', 'Moderate', 'High', 'Very high'];
+        if (idx >= 0 && idx <= 4) {
+          return { text: `${cls} — ${levels[idx]} ${noun}`, cls: '' };
+        }
+      }
+      return { text: String(cls), cls: '' };
+    }
+    return { text: fmtVal(r.value), cls: '' };
+  }
+
+  function renderInspectHtml(latlng, results) {
+    const coords = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
+    if (results.length === 0) {
+      return `<div class="inspect-coords">${coords}</div>` +
+             `<div class="inspect-empty">No layers visible.</div>`;
+    }
+    let rows = '';
+    results.forEach(r => {
+      const v = fmtInspectValue(r);
+      rows += `<tr>
+        <td class="inspect-name">${escHtml(r.name || '')}</td>
+        <td class="inspect-value ${v.cls}">${escHtml(v.text)}</td>
+      </tr>`;
+    });
+    return `<div class="inspect-coords">${coords}</div>
+      <table class="inspect-table"><tbody>${rows}</tbody></table>`;
   }
 
   // ----- Raster preview (replaces visualizeRasterFile) -----
@@ -636,6 +735,27 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // ----- Init -----
-  setupMap();
-  displayUserFiles();
+  function normalizeFilePath(p) {
+    return (p || '').replace(/^\/?(?:media|data)\//i, '').replace(/\\/g, '/');
+  }
+
+  async function init() {
+    setupMap();
+    await displayUserFiles();
+
+    // Chain-link from suitability / similarity: ?file=<path> pre-selects the
+    // matching processed-file radio. Tolerant of leading /media/ or data/.
+    const params = new URLSearchParams(window.location.search);
+    const presetFile = params.get('file');
+    if (presetFile) {
+      const target = normalizeFilePath(presetFile);
+      const radio = Array.from(document.querySelectorAll('.file-radio'))
+                         .find(r => normalizeFilePath(r.value) === target);
+      if (radio) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change'));
+      }
+    }
+  }
+  init();
 });

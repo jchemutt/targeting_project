@@ -44,6 +44,48 @@ document.addEventListener('DOMContentLoaded', () => {
     return Number(v).toPrecision(2);
   }
 
+  // ----- Inspect popup helpers (click on the map to sample raster values) -----
+  function fmtInspectValue(r) {
+    if (r.error)        return { text: 'error',         cls: 'is-empty' };
+    if (r.outOfBounds)  return { text: 'out of bounds', cls: 'is-empty' };
+    if (r.nodata || r.value === null || r.value === undefined) {
+      return { text: 'no data', cls: 'is-empty' };
+    }
+    if (r.isResult && r.range && Number.isInteger(Math.round(r.value))) {
+      const cls = Math.round(r.value);
+      const lo = Math.round(r.range[0]);
+      const hi = Math.round(r.range[1]);
+      if (lo === 1 && hi === 5) {
+        let idx = cls - 1;
+        if (r.invert) idx = 4 - idx;
+        const levels = ['Very low', 'Low', 'Moderate', 'High', 'Very high'];
+        if (idx >= 0 && idx <= 4) {
+          return { text: `${cls} — ${levels[idx]} similarity`, cls: '' };
+        }
+      }
+      return { text: String(cls), cls: '' };
+    }
+    return { text: fmtVal(r.value), cls: '' };
+  }
+
+  function renderInspectHtml(latlng, results) {
+    const coords = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
+    if (results.length === 0) {
+      return `<div class="inspect-coords">${coords}</div>` +
+             `<div class="inspect-empty">No layers visible.</div>`;
+    }
+    let rows = '';
+    results.forEach(r => {
+      const v = fmtInspectValue(r);
+      rows += `<tr>
+        <td class="inspect-name">${escHtml(r.name || '')}</td>
+        <td class="inspect-value ${v.cls}">${escHtml(v.text)}</td>
+      </tr>`;
+    });
+    return `<div class="inspect-coords">${coords}</div>
+      <table class="inspect-table"><tbody>${rows}</tbody></table>`;
+  }
+
   // ----- Layer metadata modal -----
   function metaNum(v) {
     if (v === null || v === undefined || v === "" || isNaN(v)) return "—";
@@ -203,6 +245,38 @@ document.addEventListener('DOMContentLoaded', () => {
       entry.leafletLayer.setOpacity(value);
     }
 
+    // Sample each visible non-error layer at one WGS84 point.
+    async function queryAt(latlng) {
+      if (!API.queryPoint) return [];
+      const visible = [];
+      active.forEach((entry, fp) => {
+        if (entry.visible && !entry.error && !entry.loading) {
+          visible.push({ fp, entry });
+        }
+      });
+      const fetches = visible.map(async ({ fp, entry }) => {
+        const src = entry.isResult ? '&source=result' : '';
+        try {
+          const url = `${API.queryPoint}?path=${encodeURIComponent(fp)}&lat=${latlng.lat}&lng=${latlng.lng}${src}`;
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          return {
+            name: entry.fileName,
+            value: data.value,
+            nodata: !!data.nodata,
+            outOfBounds: !!data.out_of_bounds,
+            isResult: !!entry.isResult,
+            invert: !!entry.invert,
+            range: entry.range,
+          };
+        } catch (err) {
+          return { name: entry.fileName, error: true };
+        }
+      });
+      return Promise.all(fetches);
+    }
+
     function render() {
       const el = ensure();
       if (!el) return;
@@ -281,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    return { addLayer, removeLayer };
+    return { addLayer, removeLayer, queryAt };
   })();
 
   // ----- Map setup -----
@@ -327,6 +401,21 @@ document.addEventListener('DOMContentLoaded', () => {
       updatePointsInput();
     });
     map.on(L.Draw.Event.DELETED, updatePointsInput);
+
+    // Click any pixel to inspect raster values. Suppress while a draw /
+    // edit / delete handler is active so we don't fight with marker drops.
+    let inspectSuppressed = false;
+    map.on('draw:drawstart draw:editstart draw:deletestart', () => { inspectSuppressed = true; });
+    map.on('draw:drawstop  draw:editstop  draw:deletestop',  () => { inspectSuppressed = false; });
+    map.on('click', async (e) => {
+      if (inspectSuppressed) return;
+      const results = await MapLayers.queryAt(e.latlng);
+      if (results.length === 0) return;
+      L.popup({ maxWidth: 280, className: 'inspect-popup' })
+        .setLatLng(e.latlng)
+        .setContent(renderInspectHtml(e.latlng, results))
+        .openOn(map);
+    });
   }
 
   function updatePointsInput() {
@@ -443,6 +532,30 @@ document.addEventListener('DOMContentLoaded', () => {
     MapLayers.removeLayer(filePath);
   }
 
+  // ----- Chain-workflow links (open the result in Land Statistics) -----
+  function renderChainLinks(resultPath) {
+    let container = document.getElementById('resultChainLinks');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'resultChainLinks';
+      container.className = 'mt-2';
+      const resultSection = document.getElementById('resultSection');
+      if (resultSection) resultSection.appendChild(container);
+    }
+    const statsUrl = (CONFIG.pages && CONFIG.pages.statistics) || '/statistics';
+    const link = (path, label) => {
+      if (!path) return '';
+      const href = `${statsUrl}?file=${encodeURIComponent(path)}`;
+      return `<a href="${href}" target="_blank" rel="noopener" class="btn btn-outline-success btn-sm btn-block">
+        <i class="fas fa-arrow-circle-right"></i> ${escHtml(label)}
+        <i class="fas fa-external-link-alt" style="font-size:.75em;opacity:.7;margin-left:4px"></i>
+      </a>`;
+    };
+    container.innerHTML =
+      link(resultPath.mnobis, 'Open Mahalanobis in Land Statistics') +
+      link(resultPath.mess,   'Open MESS in Land Statistics');
+  }
+
   // ----- Validate + submit -----
   function validateForm(event) {
     if (event && event.preventDefault) event.preventDefault();
@@ -490,6 +603,11 @@ document.addEventListener('DOMContentLoaded', () => {
           $('#downloadMessLink').attr('href', messUrl);
           $('#downloadMnobisLink').attr('href', mnobisUrl);
           $('#resultSection').show();
+
+          // Chain-workflow buttons: one-click jump into Land Statistics with
+          // the result pre-selected. Render once; reuse the same buttons on
+          // re-runs by clearing and re-populating ``#resultChainLinks``.
+          renderChainLinks(data.result_path || {});
 
           // Tile both results on the main map. Replace any previous.
           currentResultKeys.forEach((k) => MapLayers.removeLayer(k));
