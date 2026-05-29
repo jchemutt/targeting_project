@@ -161,6 +161,11 @@ def _resolve_raster_path(path_param: str) -> str | None:
     raster_path = path_param.lstrip('/\\').replace('\\', '/')
     if not raster_path.lower().endswith('.tif'):
         return None
+    # Tolerate paths that already include a leading "data/" segment — the
+    # reference-layers API returns paths in that shape, but ``data/`` is
+    # always the base directory we resolve under anyway.
+    if raster_path.lower().startswith('data/'):
+        raster_path = raster_path[len('data/'):]
     base = os.path.realpath(os.path.join(settings.BASE_DIR, 'data'))
     target = os.path.realpath(os.path.join(base, raster_path))
     if not (target == base or target.startswith(base + os.sep)):
@@ -318,15 +323,19 @@ def tile_raster(request, z: int, x: int, y: int):
         with _RioReader(full_path) as src:
             img = src.tile(x, y, z, **tile_kwargs)
         # rescale mutates ImageData in place in rio-tiler 6.x (returns None);
-        # don't reassign, just call.
-        img.rescale(in_range=((vmin, vmax),))
-        # Results use a red->green suitability ramp; inputs use viridis.
-        colormap = _rio_cmap.get('viridis')
-        if is_result:
-            try:
-                colormap = _rio_cmap.get('rdylgn')
-            except Exception:
-                pass
+        # don't reassign, just call. ``invert=1`` swaps the in-range so the
+        # colormap appears reversed without depending on a ``_r`` cmap variant.
+        in_range = ((vmax, vmin),) if request.GET.get('invert') == '1' else ((vmin, vmax),)
+        img.rescale(in_range=in_range)
+        # Default colormaps: viridis for inputs, rdylgn for results. A
+        # ``?cmap=<name>`` query param overrides either; if rio-tiler doesn't
+        # know the requested name, we fall back to the default.
+        default_cmap = 'rdylgn' if is_result else 'viridis'
+        cmap_name = request.GET.get('cmap') or default_cmap
+        try:
+            colormap = _rio_cmap.get(cmap_name)
+        except Exception:
+            colormap = _rio_cmap.get(default_cmap if default_cmap != cmap_name else 'viridis')
         content = img.render(img_format='PNG', colormap=colormap)
     except _TileOutsideBounds:
         content = _TRANSPARENT_PNG
@@ -850,11 +859,24 @@ def process_land_similarity(request):
         land_similarity = LandSimilarity(parameters, request.session)
         result = land_similarity.execute()
 
+        def _strip_media(u):
+            if not u:
+                return None
+            if u.startswith('/media/'):
+                return u[len('/media/'):]
+            if u.startswith('media/'):
+                return u[len('media/'):]
+            return u
+
         return JsonResponse({
             'status': 'success',
             'result_url': {
                 'mnobis': request.build_absolute_uri(result['Mahalanobis']),
                 'mess': request.build_absolute_uri(result['MESS']),
+            },
+            'result_path': {
+                'mnobis': _strip_media(result.get('Mahalanobis')),
+                'mess': _strip_media(result.get('MESS')),
             },
         })
 

@@ -1,16 +1,101 @@
+/* Land Statistics — page-specific styles.
+   The GIS workspace layout (.suit-workspace, .suit-main, .panel-*, .map-shell,
+   .map-layers-control, .meta-table, ...) is shared from suitability_page.css.
+   Only the bits particular to this page live here. */
+
 body {
     font-size: 12px;
 }
 
-#map-container {
-    height: 300px;
+/* Processed-files table in the left panel: forced to fit the panel width so
+   the Pick column is always visible (no horizontal scroll). */
+.stats-files-table {
+    font-size: 11px;
+    margin-bottom: 0;
+    table-layout: fixed;
+    width: 100%;
 }
 
-.table-responsive {
-    max-height: 500px;
-    overflow-y: auto;
+.stats-files-table th,
+.stats-files-table td {
+    padding: 4px 6px;
+    vertical-align: middle;
+    word-break: break-word;
 }
 
+/* Created column: fits "29/05/2026," on one line; time wraps onto a second
+   line at the natural space after the comma. */
+.stats-files-table th:nth-child(2),
+.stats-files-table td:nth-child(2) {
+    width: 7em;
+    word-break: normal;
+    overflow-wrap: break-word;
+}
+
+/* Pick column: just enough for the radio, centred. */
+.stats-files-table th:nth-child(3),
+.stats-files-table td:nth-child(3) {
+    width: 2.4em;
+    text-align: center;
+    padding: 4px 2px;
+    white-space: nowrap;
+}
+
+/* Make the entire row clickable to select — easier than aiming at the radio.
+   Highlight on hover and when the radio is checked. */
+.stats-files-table tbody tr {
+    cursor: pointer;
+}
+
+.stats-files-table tbody tr:hover {
+    background: var(--tt-green-tint);
+}
+
+.stats-files-table tbody tr.is-selected {
+    background: var(--tt-green-tint);
+    box-shadow: inset 3px 0 0 var(--tt-green);
+}
+
+/* Results table (populated into #resultsTable by JS) */
+#resultsTable .table {
+    font-size: 11px;
+    margin-bottom: 0;
+}
+
+#resultsTable .table th,
+#resultsTable .table td {
+    padding: 4px 8px;
+    vertical-align: middle;
+}
+
+/* Sticky table header inside the panel-body's scroll, so column headers
+   stay visible while scrolling long zonal-stats tables. */
+.stats-results-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--tt-green-tint);
+    color: var(--tt-ink);
+    border-bottom: 2px solid var(--tt-green);
+}
+
+/* The action row (CSV / Plot buttons) stays in view at the top of the
+   results panel even when the table is scrolled. */
+.results-actions {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: #fff;
+    padding-bottom: 4px;
+}
+
+/* Hide the empty-state hint once the results section is visible */
+#resultsSection[style*="block"] ~ #resultsEmptyHint,
+#resultsSection:not([style*="none"]) ~ #resultsEmptyHint {
+    display: none;
+}
+
+/* Legacy Leaflet legend control style (used by any inline legend) */
 .legend {
     background: white;
     line-height: 18px;
@@ -31,6 +116,7 @@ body {
     margin-bottom: 0;
     width: 100%;
 }
+
 /* Chart modal — bound the canvas height so Chart.js
    (maintainAspectRatio:false) has a fixed box to fill. */
 .stat-chart-wrap {

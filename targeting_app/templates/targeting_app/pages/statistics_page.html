@@ -4,132 +4,162 @@
 {% block title %}Land Statistics{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'targeting_app/css/pages/statistics_page.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/tool_page.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/suitability_page.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/statistics_page.css' %}">
 {% endblock %}
 
 {% block content %}
-<form style="display:none;">
-    {% csrf_token %}
-</form>
+<div class="tool-page suit-workspace">
+    {{ js_config|json_script:"js-config" }}
 
-{{ js_config|json_script:"js-config" }}
+    <h1 class="sr-only">Land Statistics</h1>
 
-<div class="container mt-4">
-    <h3>My Processed Files</h3>
+    {# CSRF token holder (read by the JS via the input[name=csrfmiddlewaretoken] selector) #}
+    <form style="display:none;">{% csrf_token %}</form>
 
-    <div class="row">
-        <div class="col-md-6">
-            <div class="table-responsive">
-                <table class="table table-bordered table-sm">
-                    <thead>
-                        <tr>
-                            <th>Description</th>
-                            <th>Created At</th>
-                            <th>Select File</th>
-                        </tr>
-                    </thead>
-                    <tbody id="userFilesTableBody">
-                        <!-- Files will be dynamically added here -->
-                    </tbody>
-                </table>
+    <div class="suit-main">
+
+        {# ---------- LEFT: processed files ---------- #}
+        <aside class="suit-panel panel-layers">
+            <div class="panel-head"><i class="fas fa-folder-open"></i>Processed files</div>
+            <div class="panel-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm stats-files-table">
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Created</th>
+                                <th>Pick</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userFilesTableBody">
+                            {# Rows populated dynamically by statistics_page.js #}
+                        </tbody>
+                    </table>
+                </div>
             </div>
+        </aside>
+
+        {# ---------- CENTRE: map + results ---------- #}
+        <div class="suit-center">
+
+            <section class="suit-panel panel-map">
+                <div class="panel-head"><i class="fas fa-map"></i>Map &mdash; selected raster</div>
+                <div id="mapSection" class="map-shell">
+                    <div id="map-container"></div>
+                    <div id="mapLayersControl" class="map-layers-control" style="display:none;"></div>
+                </div>
+            </section>
+
+            <section class="suit-panel panel-table">
+                <div class="panel-head">
+                    <i class="fas fa-table"></i>Zonal statistics results
+                </div>
+                <div class="panel-body">
+                    <div id="resultsSection" style="display:none;">
+                        <div class="results-actions mb-2">
+                            <button id="downloadCsvBtn" class="btn btn-success btn-sm" style="display:none;">
+                                <i class="fas fa-download"></i> Download CSV
+                            </button>
+                            <button id="plotChartBtn" class="btn btn-info btn-sm ml-2" style="display:none;">
+                                <i class="fas fa-chart-bar"></i> Plot
+                            </button>
+                        </div>
+                        <div id="resultsTable"></div>
+                    </div>
+                    <p id="resultsEmptyHint" class="suit-help">
+                        Pick a processed file, choose a reference layer and statistics on the right, then click <strong>Process statistics</strong>.
+                    </p>
+                </div>
+            </section>
+
         </div>
 
-        <div class="col-md-6">
-            <table class="table table-bordered mb-3">
-                <tbody>
-                    <tr>
-                        <td><strong>Select Reference Layer</strong></td>
-                        <td>
-                            <select id="zoneIdColumn" class="form-control">
-                                <option value="">Select Reference Layer</option>
-                            </select>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><strong>Select Statistic Types</strong></td>
-                        <td>
-                            <div class="dropdown">
-                                <button class="btn btn-outline-secondary dropdown-toggle" type="button"
-                                        id="statDropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                    Statistic Types
-                                </button>
-                                <div class="dropdown-menu" aria-labelledby="statDropdown">
-                                    <label class="dropdown-item">
-                                        <input type="checkbox" class="stat-checkbox" id="allStatsCheckbox" value="All"> All
-                                    </label>
-                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="mean"> Mean</label>
-                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="sum"> Sum</label>
-                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="median"> Median</label>
-                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="min"> Minimum</label>
-                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="max"> Maximum</label>
-                                    <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="std"> Standard Deviation</label>
-                                </div>
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+        {# ---------- RIGHT: parameters & run ---------- #}
+        <aside class="suit-panel panel-side">
+            <div class="panel-head"><i class="fas fa-cog"></i>Reference &amp; statistics</div>
+            <div class="panel-body">
 
-            <div id="map-container"></div>
+                <div class="form-group">
+                    <label for="zoneIdColumn"><strong>Reference layer</strong></label>
+                    <select id="zoneIdColumn" class="form-control form-control-sm">
+                        <option value="">Pick a raster file first…</option>
+                    </select>
+                </div>
 
-            <button id="processBtn" class="btn btn-primary mt-3" disabled>
-                Process Statistics
-            </button>
-        </div>
-    </div>
+                <div class="form-group">
+                    <label><strong>Statistic types</strong></label>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle btn-block"
+                                type="button" id="statDropdown"
+                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            Choose statistics
+                        </button>
+                        <div class="dropdown-menu" aria-labelledby="statDropdown">
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" id="allStatsCheckbox" value="All"> All</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="mean"> Mean</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="sum"> Sum</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="median"> Median</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="min"> Minimum</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="max"> Maximum</label>
+                            <label class="dropdown-item"><input type="checkbox" class="stat-checkbox" value="std"> Standard deviation</label>
+                        </div>
+                    </div>
+                </div>
 
-    <div id="resultsSection" class="mt-5" style="display: none;">
-        <h3>Results</h3>
-        <button id="downloadCsvBtn" class="btn btn-success mt-3" style="display: none;">
-            Download CSV
-        </button>
-        <button id="plotChartBtn" class="btn btn-info mt-3 ml-2" style="display: none;">
-            Plot
-        </button>
-        <div id="resultsTable"></div>
-    </div>
-</div>
-
-<div class="modal fade" id="chartModal" tabindex="-1" aria-labelledby="chartModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="chartModalLabel">Land Statistics Chart</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span>&times;</span>
+                <button id="processBtn" class="btn btn-success btn-block mt-3" disabled>
+                    <i class="fas fa-play"></i> Process statistics
                 </button>
-            </div>
-            <div class="modal-body">
-                <label for="statSelect">Select Statistic to Plot:</label>
-                <select id="statSelect" class="form-control mb-3"></select>
-                <div class="stat-chart-wrap">
-                    <canvas id="statChart"></canvas>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<div class="modal fade" id="processingModal" tabindex="-1" aria-labelledby="processingModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-body text-center">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="sr-only">Loading.</span>
+            </div>
+        </aside>
+
+    </div>
+
+    {% include 'targeting_app/includes/modals.html' %}
+
+    {# ---------- Chart modal ---------- #}
+    <div class="modal fade" id="chartModal" tabindex="-1" aria-labelledby="chartModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="chartModalLabel">Land Statistics &mdash; chart</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
                 </div>
-                <p class="mt-3">Processing your request. Please wait...</p>
+                <div class="modal-body">
+                    <label for="statSelect">Statistic to plot:</label>
+                    <select id="statSelect" class="form-control mb-3"></select>
+                    <div class="stat-chart-wrap">
+                        <canvas id="statChart"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
+
+    {# ---------- Processing modal ---------- #}
+    <div class="modal fade" id="processingModal" tabindex="-1" aria-labelledby="processingModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-body text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="sr-only">Loading.</span>
+                    </div>
+                    <p class="mt-3">Processing your request. Please wait...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </div>
 {% endblock %}
 
-{% block extra_js %}
-<script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
-<script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.1.0/chroma.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% block footer %}{% endblock %}
 
-<script src="{% static 'targeting_app/js/statistics_page.js' %}"></script>
+{% block extra_js %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{% static 'targeting_app/js/statistics_page.js' %}"></script>
 {% endblock %}

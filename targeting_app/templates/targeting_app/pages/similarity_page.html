@@ -5,92 +5,110 @@
 
 {% block extra_css %}
     <link rel="stylesheet" href="{% static 'targeting_app/css/pages/tool_page.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/suitability_page.css' %}">
+    <link rel="stylesheet" href="{% static 'targeting_app/css/pages/similarity_page.css' %}">
 {% endblock %}
 
 {% block content %}
-<div class="tool-page">
+<div class="tool-page suit-workspace">
     {{ js_config|json_script:"js-config" }}
-    <div class="container mt-4">
-        <h3>Data - Land Similarity</h3>
-        <div class="row">
-            <div class="col-md-5">
+
+    <h1 class="sr-only">Land Similarity</h1>
+
+    <div class="suit-main">
+
+        {# ---------- LEFT: data layers ---------- #}
+        <aside class="suit-panel panel-layers">
+            <div class="panel-head"><i class="fas fa-layer-group"></i>Data layers</div>
+            <div class="panel-body">
                 <div id="fileList"></div>
             </div>
-            <div class="col-md-7">
-                <div class="card small-text mb-4">
-                    <div class="card-body">
-                        <h5 class="card-title">Selected Data:</h5>
-                        <div id="selectedFilesContainer"></div>
-                    </div>
-                </div>
-                <div class="card small-text" id="aoiSection">
-                    <div class="card-body">
-                        <h5 class="card-title">Select Sample Points</h5>
+        </aside>
 
-                        <div class="form-check-group d-flex align-items-center">
-                            <div class="form-check mr-3">
-                                <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionMap" value="map" checked>
-                                <label class="form-check-label" for="aoiOptionMap">Select on the Map</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionFile" value="file">
-                                <label class="form-check-label" for="aoiOptionFile">Upload File (Points GeoJSON/CSV (Latitude,Longitude))</label>
-                            </div>
-                        </div>
-                        
-                        <!-- Map section -->
-                        <div id="mapSection" class="mt-3">
-                            <div id="map-container"></div>
-                        </div>
-                        
-                        <!-- File upload section -->
-                        <div id="fileUploadSection" class="mt-3" style="display: none;">
-                            <label for="aoiFileUpload">Upload file (Points GeoJSON/CSV (Latitude,Longitude)):</label>
-                            <input type="file" id="aoiFileUpload" name="aoiFileUpload" accept=".geojson, .csv">
-                            <div id="fileError" class="error mt-2"></div>
-                        </div>
-                        
-            
-                    </div>
+        {# ---------- CENTRE: map + selected layers ---------- #}
+        <div class="suit-center">
+
+            <section class="suit-panel panel-map">
+                <div class="panel-head"><i class="fas fa-map"></i>Map &mdash; drop sample points</div>
+                <div id="mapSection" class="map-shell">
+                    <div id="map-container"></div>
+                    <div id="mapLayersControl" class="map-layers-control" style="display:none;"></div>
                 </div>
-                <div class="card small-text">
-                    <div class="card-body">
-                        <form id="selectedFilesForm" method="POST" action="/api/processLandSimilarity" onsubmit="return validateForm(event)">
-                            {% csrf_token %}
-                            <input type="hidden" id="pointsInput" name="points" value="">
-                            <input type="hidden" id="uploadedPointsInput" name="uploadedPoints" value="">
-                            <div class="form-group">
-                                <label for="description">
-                                    Description: <span style="color: red;">*</span>
-                                </label>
-                                <input type="text"  id="description" name="description" class="form-control"
-                                       placeholder="Enter a brief title of your analysis" required>
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-sm" id="submitBtn"><i class="fas fa-play"> </i> Run Analysis</button>
-                        </form>
-                        <div id="resultSection" class="mt-3" style="display: none;">
-                            <h4>Processing Complete</h4>
-                            <a id="downloadMessLink" href="#" class="btn btn-success btn-sm" download>
-                                <i class="fas fa-download"></i> Download MESS
-                            </a>
-                            <a id="downloadMnobisLink" href="#" class="btn btn-success btn-sm" download>
-                                <i class="fas fa-download"></i> Download Mahalanobis Distance
-                            </a>
-                                        
-                            <button id="viewMnobisMapBtn" class="btn btn-info btn-sm mt-2">
-                                <i class="fas fa-map"></i> View Mahalanobis Map
-                            </button>
-                        </div>
-                    </div>
+            </section>
+
+            <section class="suit-panel panel-table">
+                <div class="panel-head">
+                    <i class="fas fa-table"></i>Selected layers
+                    <span class="panel-hint">&mdash; choose at least two to compare</span>
                 </div>
-            </div>
+                <div class="panel-body">
+                    <div id="selectedFilesContainer" class="selected-files"></div>
+                </div>
+            </section>
+
         </div>
-    </div>
 
+        {# ---------- RIGHT: sample points + run + results ---------- #}
+        <aside class="suit-panel panel-side">
+            <div class="panel-head"><i class="fas fa-crosshairs"></i>Sample points &amp; analysis</div>
+            <div class="panel-body">
+
+                <div class="suit-section-title">Sample points</div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionMap" value="map" checked>
+                    <label class="form-check-label" for="aoiOptionMap">Select on the map</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionFile" value="file">
+                    <label class="form-check-label" for="aoiOptionFile">Upload file (GeoJSON / CSV)</label>
+                </div>
+
+                <div id="fileUploadSection" class="points-upload mt-2" style="display: none;">
+                    <label for="aoiFileUpload">Points file (GeoJSON, or CSV with Latitude, Longitude)</label>
+                    <input type="file" id="aoiFileUpload" name="aoiFileUpload" accept=".geojson, .csv" class="form-control-file">
+                    <div id="fileError" class="error mt-2"></div>
+                </div>
+
+                <p class="suit-help">In map mode, use the marker tool (top-left of the map) to drop reference points.</p>
+
+                <hr>
+
+                <form id="selectedFilesForm" method="POST">
+                    {% csrf_token %}
+                    <input type="hidden" id="pointsInput" name="points" value="">
+                    <input type="hidden" id="uploadedPointsInput" name="uploadedPoints" value="">
+
+                    <div class="suit-section-title">Run analysis</div>
+                    <div class="form-group">
+                        <label for="description">Description <span style="color: red;">*</span></label>
+                        <input type="text" id="description" name="description" class="form-control"
+                               placeholder="Enter a brief title of your analysis" required>
+                    </div>
+                    <button type="submit" class="btn btn-success btn-block" id="submitBtn">
+                        <i class="fas fa-play"></i> Run Analysis
+                    </button>
+                </form>
+
+                <div id="resultSection" class="mt-3" style="display: none;">
+                    <h6 class="suit-section-title">Processing complete</h6>
+                    <a id="downloadMessLink" href="#" class="btn btn-success btn-sm btn-block" download>
+                        <i class="fas fa-download"></i> Download MESS
+                    </a>
+                    <a id="downloadMnobisLink" href="#" class="btn btn-success btn-sm btn-block" download>
+                        <i class="fas fa-download"></i> Download Mahalanobis
+                    </a>
+                </div>
+
+            </div>
+        </aside>
+
+    </div>
 
     {% include 'targeting_app/includes/modals.html' %}
 </div>
 {% endblock %}
+
+{% block footer %}{% endblock %}
 
 {% block extra_js %}
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.1.0/chroma.min.js"></script>
