@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', function () {
   let currentReferenceKey = null;  // the reference layer currently shown on the map
   let selectedDescription = null;
   let selectedRasterFile  = null;
+  let selectedRasterTitle = null;
   let selectedCountry     = "";
   let selectedReferenceFile = "";
 
@@ -487,6 +488,7 @@ document.addEventListener('DOMContentLoaded', function () {
         selectedDescription = this.dataset.description;
         selectedCountry = this.dataset.country;
         const fileName = this.dataset.name;
+        selectedRasterTitle = fileName;
 
         // Drop any previous reference-layer overlay & selection — the new
         // file may cover a different country/region.
@@ -682,6 +684,84 @@ document.addEventListener('DOMContentLoaded', function () {
       renderChart(defaultStat, classes, statsPerClass);
       $('#chartModal').modal('show');
     };
+
+    // PDF report button — placed under the results table.
+    renderReportButton(statistics, selectedStats);
+  }
+
+  // ----- PDF report -----
+  function renderReportButton(results, statTypes) {
+    let container = document.getElementById('resultReportLinks');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'resultReportLinks';
+      container.className = 'mt-2';
+      const resultsSection = document.getElementById('resultsSection');
+      if (resultsSection) resultsSection.appendChild(container);
+    }
+    container.innerHTML =
+      `<button type="button" id="exportReportBtn" class="btn btn-outline-success btn-sm">
+         <i class="fas fa-file-pdf"></i> Export PDF report
+       </button>`;
+    document.getElementById('exportReportBtn').addEventListener('click',
+      () => exportReport(results, statTypes));
+  }
+
+  function exportReport(results, statTypes) {
+    if (!API.reportStatistics) return;
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+    // Compose a meaningful report title from the selected file's title and
+    // the reference layer name.
+    let refName = '';
+    if (referenceSelect && referenceSelect.selectedIndex >= 0) {
+      refName = referenceSelect.options[referenceSelect.selectedIndex].textContent || '';
+    }
+    const description = selectedRasterTitle
+      ? `${selectedRasterTitle}${refName ? ' — ' + refName : ''}`
+      : 'Statistics analysis';
+
+    const btn = document.getElementById('exportReportBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating PDF…';
+    }
+    fetch(API.reportStatistics, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({
+        raster_path: selectedRasterFile,
+        raster_description: selectedDescription || '',
+        description,
+        reference_layer_name: refName,
+        stat_types: statTypes || [],
+        results: results || [],
+      }),
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+          throw new Error(j.error || 'Report generation failed');
+        }
+        return r.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = (description || 'statistics_report').replace(/[^\w-]+/g, '_').slice(0, 60);
+        a.download = safeName + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch((err) => alert('Could not generate PDF: ' + err.message))
+      .finally(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-file-pdf"></i> Export PDF report';
+        }
+      });
   }
 
   function renderChart(selectedStat, classes, statsPerClass) {

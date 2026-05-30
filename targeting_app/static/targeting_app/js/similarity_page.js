@@ -556,6 +556,74 @@ document.addEventListener('DOMContentLoaded', () => {
       link(resultPath.mess,   'Open MESS in Land Statistics');
   }
 
+  // ----- PDF report -----
+  function renderReportButton(resultPaths, description, selectedLayers, pointsStr) {
+    let container = document.getElementById('resultReportLinks');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'resultReportLinks';
+      container.className = 'mt-2';
+      const resultSection = document.getElementById('resultSection');
+      if (resultSection) resultSection.appendChild(container);
+    }
+    container.innerHTML =
+      `<button type="button" id="exportReportBtn" class="btn btn-outline-success btn-sm btn-block">
+         <i class="fas fa-file-pdf"></i> Export PDF report
+       </button>`;
+    document.getElementById('exportReportBtn').addEventListener('click',
+      () => exportReport(resultPaths, description, selectedLayers, pointsStr));
+  }
+
+  function exportReport(resultPaths, description, selectedLayers, pointsStr) {
+    if (!API.reportSimilarity) return;
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+    // Selected layers: pass the display names (basenames) so the report
+    // reads cleanly. Frontend caller already passes file paths; we'll trim.
+    const layerNames = (selectedLayers || []).map(p =>
+      String(p).split(/[\\/]/).pop());
+
+    const btn = document.getElementById('exportReportBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating PDF…';
+    }
+    fetch(API.reportSimilarity, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({
+        result_paths: resultPaths || {},
+        description: description || 'Similarity analysis',
+        selected_layers: layerNames,
+        points: pointsStr || '',
+      }),
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+          throw new Error(j.error || 'Report generation failed');
+        }
+        return r.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = (description || 'similarity_report').replace(/[^\w-]+/g, '_').slice(0, 60);
+        a.download = safeName + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch((err) => alert('Could not generate PDF: ' + err.message))
+      .finally(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-file-pdf"></i> Export PDF report';
+        }
+      });
+  }
+
   // ----- Validate + submit -----
   function validateForm(event) {
     if (event && event.preventDefault) event.preventDefault();
@@ -608,6 +676,12 @@ document.addEventListener('DOMContentLoaded', () => {
           // the result pre-selected. Render once; reuse the same buttons on
           // re-runs by clearing and re-populating ``#resultChainLinks``.
           renderChainLinks(data.result_path || {});
+          renderReportButton(
+            data.result_path || {},
+            formData.description,
+            formData.selectedFiles,
+            formData.points,
+          );
 
           // Tile both results on the main map. Replace any previous.
           currentResultKeys.forEach((k) => MapLayers.removeLayer(k));

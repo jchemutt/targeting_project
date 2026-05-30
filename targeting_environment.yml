@@ -16,4 +16,10 @@ dependencies:
   - psycopg2
   - gunicorn
   - dbfread
+  # Server-side tiling + metadata (rio-tiler 9.x uses PEP 728 TypedDict which
+  # is Python 3.13+ only, so pin to the 6.x line for Python 3.12).
+  - rio-tiler<7
+  # PDF report generation (Land Suitability "Export PDF report" button and
+  # follow-ups for Similarity / Statistics).
+  - reportlab
   - pip

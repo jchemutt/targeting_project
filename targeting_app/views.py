@@ -5,10 +5,12 @@ Page views render the analysis tools; the `api/*` views are JSON endpoints
 called by the frontend to browse data, run analyses and manage the session.
 """
 
+import io
 import json
 import logging
 import math
 import os
+import re
 
 from django.conf import settings
 from django.contrib.auth.decorators import user_passes_test
@@ -60,6 +62,9 @@ def _js_config():
             'processLandSimilarity': reverse('process_land_similarity'),
             'processStatistics': reverse('process_statistics'),
             'queryPoint': reverse('query_point'),
+            'reportSuitability': reverse('report_suitability'),
+            'reportSimilarity': reverse('report_similarity'),
+            'reportStatistics': reverse('report_statistics'),
         },
         'pages': {
             'statistics': reverse('statistics'),
@@ -329,11 +334,16 @@ def tile_raster(request, z: int, x: int, y: int):
             tile_kwargs['nodata'] = nodata
         with _RioReader(full_path) as src:
             img = src.tile(x, y, z, **tile_kwargs)
-        # rescale mutates ImageData in place in rio-tiler 6.x (returns None);
-        # don't reassign, just call. ``invert=1`` swaps the in-range so the
-        # colormap appears reversed without depending on a ``_r`` cmap variant.
-        in_range = ((vmax, vmin),) if request.GET.get('invert') == '1' else ((vmin, vmax),)
-        img.rescale(in_range=in_range)
+        # ``invert=1`` flips the colour ramp. Reversing ``in_range`` as
+        # ``((vmax, vmin),)`` does NOT work: rio-tiler's rescale calls
+        # ``np.clip(image, imin, imax)`` internally, and numpy's clip with
+        # ``imin > imax`` collapses every value to a single constant
+        # (everything ends up at one end of the colormap — the all-green
+        # Mahalanobis bug). Mirror the data values instead so the rescale
+        # can run with a normal ``(vmin, vmax)`` ordering.
+        if request.GET.get('invert') == '1':
+            img.array = (vmin + vmax) - img.array
+        img.rescale(in_range=((vmin, vmax),))
         # Default colormaps: viridis for inputs, rdylgn for results. A
         # ``?cmap=<name>`` query param overrides either; if rio-tiler doesn't
         # know the requested name, we fall back to the default.
@@ -470,6 +480,675 @@ def query_point(request):
     except Exception:
         logger.exception('query_point failed for %s', full_path)
         return JsonResponse({'value': None, 'out_of_bounds': True})
+
+
+# ============================== PDF reports ==============================
+
+def _render_result_png(raster_path: str, vmin: float, vmax: float,
+                       invert: bool = False, cmap: str = 'rdylgn',
+                       max_size: int = 1000) -> bytes:
+    """Render a downsampled PNG snapshot of a raster with the given colormap
+    (same set the tile endpoint uses). Returns PNG bytes.
+    """
+    from rio_tiler.io import Reader as _RioReader
+    from rio_tiler.colormap import cmap as _rio_cmap
+    with _RioReader(raster_path) as src:
+        img = src.preview(max_size=max_size)
+    # Reversing in_range as ``((vmax, vmin),)`` does NOT work for rio-tiler's
+    # rescale: it calls ``np.clip(image, imin, imax)`` internally, and clip
+    # with ``imin > imax`` collapses every value to a constant (everything
+    # ends up rendered at one end of the colormap). Mirror the values
+    # instead so we can rescale with a normal ``(vmin, vmax)`` ordering.
+    if invert:
+        img.array = (vmin + vmax) - img.array
+    img.rescale(in_range=((vmin, vmax),))
+    try:
+        colormap = _rio_cmap.get(cmap)
+    except Exception:
+        colormap = _rio_cmap.get('viridis')
+    return img.render(img_format='PNG', colormap=colormap)
+
+
+def _cmap_opts_for_description(description: str, is_data_layer: bool = False):
+    """Pick a (cmap, invert) pair for a processed-file or data raster, so the
+    PDF map matches what the user saw in the browser (click-to-inspect logic).
+    """
+    if is_data_layer or not description:
+        return ('viridis', False)
+    if description == 'Mahalanobis Distance raster file':
+        return ('rdylgn', True)
+    # Suitability, MESS, anything else with a result-style ramp.
+    return ('rdylgn', False)
+
+
+def _report_styles():
+    """Brand colours + Paragraph styles shared by every report builder.
+    Returns ``(colors_dict, styles_dict)``.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    C = {
+        'green':       colors.HexColor('#009933'),
+        'green_dark':  colors.HexColor('#007a29'),
+        'green_tint':  colors.HexColor('#eef6ef'),
+        'ink':         colors.HexColor('#1f2d24'),
+        'muted':       colors.HexColor('#5f6f64'),
+        'border':      colors.HexColor('#e3e8e4'),
+    }
+    base = getSampleStyleSheet()
+    S = {
+        'h1': ParagraphStyle('TTH1', parent=base['Heading1'],
+                             textColor=C['green'], fontSize=16, leading=20,
+                             spaceAfter=2),
+        'subtitle': ParagraphStyle('TTSub', parent=base['Normal'],
+                                   textColor=C['muted'], fontSize=9,
+                                   leading=12, spaceAfter=10),
+        'h2': ParagraphStyle('TTH2', parent=base['Heading2'],
+                             textColor=C['ink'], fontSize=11, leading=14,
+                             spaceBefore=10, spaceAfter=4),
+        'body': ParagraphStyle('TTBody', parent=base['Normal'],
+                               textColor=C['ink'], fontSize=9, leading=12),
+        'caption': ParagraphStyle('TTCap', parent=base['Normal'],
+                                  fontSize=8, textColor=C['muted'],
+                                  alignment=1, spaceAfter=8, leading=10),
+        'footer': ParagraphStyle('TTFoot', parent=base['Normal'],
+                                 fontSize=8, textColor=C['muted'],
+                                 alignment=1, leading=10),
+    }
+    return C, S
+
+
+def _result_image_flowable(raster_path, cmap='rdylgn', invert=False,
+                            max_w_cm=17.0, max_h_cm=11.0):
+    """Render a result raster via rio-tiler and return a ReportLab Image
+    flowable, sized to fit (max_w_cm x max_h_cm) preserving aspect ratio.
+    Returns ``None`` if rendering fails (callers should put a placeholder).
+    """
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Image as RLImage
+    from PIL import Image as _PIL
+    info = _get_raster_info(raster_path) or {}
+    rng = info.get('range') or [0, 1]
+    vmin, vmax = float(rng[0]), float(rng[1])
+    if vmax <= vmin:
+        vmax = vmin + 1.0
+    png = _render_result_png(raster_path, vmin, vmax,
+                             invert=invert, cmap=cmap)
+    buf = io.BytesIO(png)
+    with _PIL.open(buf) as test:
+        iw, ih = test.size
+    buf.seek(0)
+    aspect = iw / max(ih, 1)
+    if max_w_cm / aspect <= max_h_cm:
+        w_cm, h_cm = max_w_cm, max_w_cm / aspect
+    else:
+        w_cm, h_cm = max_h_cm * aspect, max_h_cm
+    return RLImage(buf, width=w_cm * cm, height=h_cm * cm)
+
+
+def _fmt_num_for_pdf(v):
+    """Format a numeric value for the PDF table; '-' for empty/None."""
+    if v is None or v == '':
+        return '—'
+    try:
+        f = float(v)
+        if f.is_integer():
+            return f'{int(f):,}'
+        if abs(f) >= 100:
+            return f'{f:,.1f}'
+        return f'{f:.2f}'
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _xml_escape_for_pdf(s) -> str:
+    return (str(s).replace('&', '&amp;').replace('<', '&lt;')
+                  .replace('>', '&gt;').replace('"', '&quot;'))
+
+
+def _aoi_summary_text(aoi_str: str):
+    """Walk a GeoJSON Feature / FeatureCollection / Geometry and return a
+    short HTML-ish summary of its bounding box, or ``None`` if empty.
+    """
+    try:
+        aoi = json.loads(aoi_str)
+    except Exception:
+        return None
+    coords_flat = []
+
+    def _walk(node):
+        if isinstance(node, dict):
+            geom = node.get('geometry', node)
+            if isinstance(geom, dict) and 'coordinates' in geom:
+                _walk(geom['coordinates'])
+            for f in node.get('features') or []:
+                _walk(f)
+        elif isinstance(node, list):
+            if (node and isinstance(node[0], (int, float))
+                    and len(node) >= 2):
+                coords_flat.append((float(node[0]), float(node[1])))
+            else:
+                for child in node:
+                    _walk(child)
+
+    _walk(aoi)
+    if not coords_flat:
+        return None
+    lngs = [c[0] for c in coords_flat]
+    lats = [c[1] for c in coords_flat]
+    return (
+        f'Bounding box &nbsp;<b>{min(lngs):.3f}° to {max(lngs):.3f}° E</b>'
+        f' &nbsp;·&nbsp; <b>{min(lats):.3f}° to {max(lats):.3f}° N</b>'
+        f'<br/>Vertices: {len(coords_flat)}'
+    )
+
+
+def _build_suitability_pdf(out_buf, title, raster_path, criteria, aoi_str):
+    """Lay out a one-page Land Suitability report into ``out_buf``."""
+    import datetime
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    )
+
+    C, S = _report_styles()
+    doc = SimpleDocTemplate(
+        out_buf, pagesize=A4,
+        topMargin=1.4 * cm, bottomMargin=1.4 * cm,
+        leftMargin=1.5 * cm, rightMargin=1.5 * cm,
+        title='Land Suitability Report', author='Targeting Tools',
+    )
+
+    story = []
+    story.append(Paragraph('Targeting Tools &mdash; Land Suitability Report', S['h1']))
+    story.append(Paragraph(
+        f'<b>{_xml_escape_for_pdf(title)}</b><br/>'
+        f'Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}',
+        S['subtitle']))
+
+    # Map snapshot
+    try:
+        img_flow = _result_image_flowable(raster_path, cmap='rdylgn',
+                                          invert=False)
+        story.append(img_flow)
+        story.append(Paragraph(
+            '<font color="#d73027">■</font>'
+            '<font color="#f46d43">■</font>'
+            '<font color="#fee08b">■</font>'
+            '<font color="#d9ef8b">■</font>'
+            '<font color="#66bd63">■</font>'
+            '<font color="#1a9850">■</font>'
+            '&nbsp;&nbsp;<i>Low</i> &rarr; <i>High</i> suitability',
+            S['caption']))
+    except Exception:
+        logger.exception('report_suitability map render failed')
+        story.append(Paragraph(
+            '<i>Map snapshot could not be rendered.</i>', S['caption']))
+
+    # Criteria table
+    if criteria:
+        story.append(Paragraph('Criteria', S['h2']))
+        rows = [['Layer', 'Min', 'Opt from', 'Opt to', 'Max', 'Combine']]
+        for c in criteria:
+            rows.append([
+                Paragraph(_xml_escape_for_pdf(c.get('name', '')), S['body']),
+                _fmt_num_for_pdf(c.get('min_val')),
+                _fmt_num_for_pdf(c.get('opti_from')),
+                _fmt_num_for_pdf(c.get('opti_to')),
+                _fmt_num_for_pdf(c.get('max_val')),
+                c.get('combine') or '—',
+            ])
+        t = Table(rows, colWidths=[5.6 * cm, 2.1 * cm, 2.1 * cm,
+                                   2.1 * cm, 2.1 * cm, 2.1 * cm])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), C['green_tint']),
+            ('TEXTCOLOR',  (0, 0), (-1, 0), C['ink']),
+            ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0, 0), (-1, -1), 9),
+            ('LINEBELOW',  (0, 0), (-1, 0), 1.2, C['green']),
+            ('GRID',       (0, 1), (-1, -1), 0.25, C['border']),
+            ('ALIGN',      (1, 0), (-1, -1), 'RIGHT'),
+            ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t)
+
+    if aoi_str:
+        info_text = _aoi_summary_text(aoi_str)
+        if info_text:
+            story.append(Paragraph('Area of interest', S['h2']))
+            story.append(Paragraph(info_text, S['body']))
+
+    story.append(Spacer(1, 16))
+    story.append(Paragraph(
+        '<i>Generated by Targeting Tools &mdash; '
+        'Alliance Bioversity / CIAT</i>', S['footer']))
+    doc.build(story)
+
+
+def _build_similarity_pdf(out_buf, title, mnobis_path, mess_path,
+                           selected_layers, points):
+    """Lay out a one-page Land Similarity report.
+
+    Two result thumbnails side-by-side (Mahalanobis on the left, MESS on the
+    right), with a colour key under each, then the inputs used and the
+    sample-points info.
+    """
+    import datetime
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    )
+
+    C, S = _report_styles()
+    doc = SimpleDocTemplate(
+        out_buf, pagesize=A4,
+        topMargin=1.4 * cm, bottomMargin=1.4 * cm,
+        leftMargin=1.5 * cm, rightMargin=1.5 * cm,
+        title='Land Similarity Report', author='Targeting Tools',
+    )
+
+    story = []
+    story.append(Paragraph('Targeting Tools &mdash; Land Similarity Report', S['h1']))
+    story.append(Paragraph(
+        f'<b>{_xml_escape_for_pdf(title)}</b><br/>'
+        f'Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}',
+        S['subtitle']))
+
+    # Two thumbnails side-by-side (each fits ~8.2 cm wide).
+    def _result_cell(path, label, cmap='rdylgn', invert=False):
+        try:
+            img = _result_image_flowable(path, cmap=cmap, invert=invert,
+                                         max_w_cm=8.2, max_h_cm=8.0)
+            cap = Paragraph(label, S['caption'])
+            return [img, cap]
+        except Exception:
+            logger.exception('similarity map render failed for %s', path)
+            return [Paragraph('<i>Map snapshot unavailable.</i>',
+                              S['caption']),
+                    Paragraph(label, S['caption'])]
+
+    legend_html = (
+        '<font color="#d73027">■</font>'
+        '<font color="#f46d43">■</font>'
+        '<font color="#fee08b">■</font>'
+        '<font color="#d9ef8b">■</font>'
+        '<font color="#66bd63">■</font>'
+        '<font color="#1a9850">■</font>'
+        '&nbsp;&nbsp;<i>Low</i> &rarr; <i>High</i> similarity')
+
+    cells = []
+    if mnobis_path:
+        cells.append(_result_cell(mnobis_path,
+                                   '<b>Mahalanobis</b><br/>' + legend_html,
+                                   invert=True))
+    if mess_path:
+        cells.append(_result_cell(mess_path,
+                                   '<b>MESS</b><br/>' + legend_html,
+                                   invert=False))
+
+    if len(cells) == 2:
+        # Two columns
+        t = Table([[cells[0], cells[1]]],
+                  colWidths=[8.5 * cm, 8.5 * cm])
+        t.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(t)
+    elif len(cells) == 1:
+        for el in cells[0]:
+            story.append(el)
+
+    # Selected layers
+    if selected_layers:
+        story.append(Paragraph('Selected layers', S['h2']))
+        rows = [[Paragraph(_xml_escape_for_pdf(n), S['body'])]
+                for n in selected_layers]
+        t = Table(rows, colWidths=[17 * cm])
+        t.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.25, C['border']),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t)
+
+    # Sample points
+    if points:
+        story.append(Paragraph('Sample points', S['h2']))
+        if len(points) > 0:
+            lngs = [float(p[0]) for p in points]
+            lats = [float(p[1]) for p in points]
+            sumtxt = (
+                f'<b>{len(points)} point{"s" if len(points) != 1 else ""}</b>'
+                f' &middot; bounding box '
+                f'<b>{min(lngs):.3f}° to {max(lngs):.3f}° E</b>'
+                f', <b>{min(lats):.3f}° to {max(lats):.3f}° N</b>')
+            story.append(Paragraph(sumtxt, S['body']))
+            preview = points[:8]
+            coord_lines = ' &middot; '.join(
+                f'({float(p[0]):.3f}, {float(p[1]):.3f})' for p in preview)
+            if len(points) > 8:
+                coord_lines += f' &middot; …+{len(points) - 8} more'
+            story.append(Spacer(1, 4))
+            story.append(Paragraph(coord_lines, S['body']))
+
+    story.append(Spacer(1, 16))
+    story.append(Paragraph(
+        '<i>Generated by Targeting Tools &mdash; '
+        'Alliance Bioversity / CIAT</i>', S['footer']))
+    doc.build(story)
+
+
+def _build_statistics_pdf(out_buf, title, raster_path, raster_description,
+                           reference_layer_name, stat_types, results):
+    """Lay out a one-page Land Statistics report.
+
+    Map snapshot of the processed file (colormap auto-picked from the file
+    type), then parameters, an embedded bar chart of the first selected
+    statistic, and the full results table.
+    """
+    import datetime
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    )
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+    C, S = _report_styles()
+    doc = SimpleDocTemplate(
+        out_buf, pagesize=A4,
+        topMargin=1.4 * cm, bottomMargin=1.4 * cm,
+        leftMargin=1.5 * cm, rightMargin=1.5 * cm,
+        title='Land Statistics Report', author='Targeting Tools',
+    )
+
+    story = []
+    story.append(Paragraph('Targeting Tools &mdash; Land Statistics Report', S['h1']))
+    story.append(Paragraph(
+        f'<b>{_xml_escape_for_pdf(title)}</b><br/>'
+        f'Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}',
+        S['subtitle']))
+
+    # ---- Map snapshot (auto-picked colormap based on file type) ----
+    cmap_name, invert = _cmap_opts_for_description(raster_description)
+    try:
+        img_flow = _result_image_flowable(raster_path, cmap=cmap_name,
+                                          invert=invert,
+                                          max_w_cm=17.0, max_h_cm=9.0)
+        story.append(img_flow)
+    except Exception:
+        logger.exception('report_statistics map render failed')
+        story.append(Paragraph(
+            '<i>Map snapshot could not be rendered.</i>', S['caption']))
+
+    # ---- Parameters block ----
+    story.append(Paragraph('Parameters', S['h2']))
+    param_rows = [['Field', 'Value']]
+    if raster_description:
+        param_rows.append(['Source type', raster_description])
+    if reference_layer_name:
+        param_rows.append(['Reference layer', reference_layer_name])
+    if stat_types:
+        param_rows.append(['Statistics', ', '.join(stat_types)])
+    if len(param_rows) > 1:
+        t = Table(param_rows, colWidths=[4.5 * cm, 12.5 * cm])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), C['green_tint']),
+            ('TEXTCOLOR',  (0, 0), (-1, 0), C['ink']),
+            ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0, 0), (-1, -1), 9),
+            ('LINEBELOW',  (0, 0), (-1, 0), 1.2, C['green']),
+            ('GRID',       (0, 1), (-1, -1), 0.25, C['border']),
+            ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t)
+
+    # ---- Results table + chart ----
+    if results and isinstance(results, list) and results:
+        item = results[0] or {}
+        stat_label = item.get('stat_label') or {}
+        per_class = item.get('statistics') or {}
+        class_names = list(stat_label.keys())
+        stats_used = stat_types or (
+            list(next(iter(per_class.values()), {}).keys())
+            if per_class else []
+        )
+
+        # Bar chart of the first selected stat across the classes.
+        if class_names and stats_used:
+            chart_stat = stats_used[0]
+            values = []
+            for cn in class_names:
+                v = (per_class.get(cn) or {}).get(chart_stat)
+                try:
+                    values.append(float(v))
+                except (TypeError, ValueError):
+                    values.append(0.0)
+            story.append(Paragraph(
+                f'{chart_stat.capitalize()} by class', S['h2']))
+            drawing = Drawing(17 * cm, 6.5 * cm)
+            bc = VerticalBarChart()
+            bc.x = 50
+            bc.y = 25
+            bc.height = 6.0 * cm - 25
+            bc.width = 17 * cm - 60
+            bc.data = [values]
+            bc.categoryAxis.categoryNames = [str(n) for n in class_names]
+            bc.categoryAxis.labels.fontSize = 7
+            bc.categoryAxis.labels.angle = 20
+            bc.categoryAxis.labels.dx = -8
+            bc.categoryAxis.labels.dy = -2
+            bc.valueAxis.labels.fontSize = 7
+            bc.valueAxis.valueMin = 0
+            bc.bars[0].fillColor = C['green']
+            bc.bars[0].strokeColor = C['green_dark']
+            bc.bars[0].strokeWidth = 0.5
+            drawing.add(bc)
+            story.append(drawing)
+
+        # Full results table.
+        story.append(Paragraph('Results', S['h2']))
+        header = ['Class', 'Land Suitability Area (%)'] + [
+            s.capitalize() for s in stats_used
+        ]
+        rows = [header]
+        for cn in class_names:
+            row = [Paragraph(_xml_escape_for_pdf(cn), S['body']),
+                   _fmt_num_for_pdf(stat_label.get(cn))]
+            for s in stats_used:
+                row.append(_fmt_num_for_pdf((per_class.get(cn) or {}).get(s)))
+            rows.append(row)
+        n_cols = len(header)
+        first_w = 4.8 * cm
+        rest_w = (17.0 - 4.8) / max(n_cols - 1, 1) * cm
+        col_widths = [first_w] + [rest_w] * (n_cols - 1)
+        t = Table(rows, colWidths=col_widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), C['green_tint']),
+            ('TEXTCOLOR',  (0, 0), (-1, 0), C['ink']),
+            ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0, 0), (-1, -1), 8.5),
+            ('LINEBELOW',  (0, 0), (-1, 0), 1.2, C['green']),
+            ('GRID',       (0, 1), (-1, -1), 0.25, C['border']),
+            ('ALIGN',      (1, 0), (-1, -1), 'RIGHT'),
+            ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        story.append(t)
+
+    story.append(Spacer(1, 16))
+    story.append(Paragraph(
+        '<i>Generated by Targeting Tools &mdash; '
+        'Alliance Bioversity / CIAT</i>', S['footer']))
+    doc.build(story)
+
+
+@require_POST
+@csrf_protect
+def report_suitability(request):
+    """Generate and return a PDF report for a Land Suitability analysis."""
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+
+    result_path = data.get('result_path')
+    if not result_path:
+        return JsonResponse({'error': 'result_path is required'},
+                            status=400)
+    full_path = _resolve_result_path(result_path)
+    if not full_path:
+        return JsonResponse({'error': 'Result file not found'},
+                            status=404)
+
+    description = (data.get('description') or 'Untitled analysis').strip()
+    criteria = data.get('criteria') or []
+    aoi = data.get('aoi') or ''
+
+    try:
+        import reportlab  # noqa: F401
+    except ImportError:
+        return JsonResponse({
+            'error': 'ReportLab is not installed. Run '
+                     '`pip install reportlab` in your environment.'
+        }, status=500)
+
+    pdf_buf = io.BytesIO()
+    try:
+        _build_suitability_pdf(pdf_buf, description, full_path, criteria, aoi)
+    except Exception:
+        logger.exception('report_suitability PDF build failed')
+        return JsonResponse({'error': 'Could not generate PDF.'},
+                            status=500)
+    pdf_buf.seek(0)
+
+    response = HttpResponse(pdf_buf.read(), content_type='application/pdf')
+    safe_name = re.sub(r'[^\w\-]+', '_', description)[:60] or 'suitability_report'
+    response['Content-Disposition'] = f'attachment; filename="{safe_name}.pdf"'
+    return response
+
+
+@require_POST
+@csrf_protect
+def report_similarity(request):
+    """Generate and return a PDF report for a Land Similarity analysis."""
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+
+    rp = data.get('result_paths') or {}
+    mnobis_rel = rp.get('mnobis')
+    mess_rel = rp.get('mess')
+    if not (mnobis_rel or mess_rel):
+        return JsonResponse(
+            {'error': 'result_paths.{mnobis,mess} required'}, status=400)
+
+    mnobis_full = _resolve_result_path(mnobis_rel) if mnobis_rel else None
+    mess_full = _resolve_result_path(mess_rel) if mess_rel else None
+    if not (mnobis_full or mess_full):
+        return JsonResponse({'error': 'No result file found'}, status=404)
+
+    description = (data.get('description') or 'Untitled analysis').strip()
+    selected_layers = data.get('selected_layers') or []
+    points = data.get('points') or []
+    # Frontend may pass points as a JSON string (the pointsInput value).
+    if isinstance(points, str):
+        try:
+            points = json.loads(points)
+        except Exception:
+            points = []
+
+    try:
+        import reportlab  # noqa: F401
+    except ImportError:
+        return JsonResponse({
+            'error': 'ReportLab is not installed. Run '
+                     '`pip install reportlab` in your environment.'
+        }, status=500)
+
+    pdf_buf = io.BytesIO()
+    try:
+        _build_similarity_pdf(
+            pdf_buf, description, mnobis_full, mess_full,
+            selected_layers, points,
+        )
+    except Exception:
+        logger.exception('report_similarity PDF build failed')
+        return JsonResponse({'error': 'Could not generate PDF.'}, status=500)
+    pdf_buf.seek(0)
+
+    response = HttpResponse(pdf_buf.read(), content_type='application/pdf')
+    safe_name = re.sub(r'[^\w\-]+', '_', description)[:60] or 'similarity_report'
+    response['Content-Disposition'] = f'attachment; filename="{safe_name}.pdf"'
+    return response
+
+
+@require_POST
+@csrf_protect
+def report_statistics(request):
+    """Generate and return a PDF report for a Land Statistics analysis."""
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+
+    raster_path = data.get('raster_path')
+    if not raster_path:
+        return JsonResponse({'error': 'raster_path is required'}, status=400)
+    full_path = _resolve_result_path(raster_path)
+    if not full_path:
+        return JsonResponse({'error': 'Result file not found'}, status=404)
+
+    description = (data.get('description') or 'Untitled analysis').strip()
+    raster_description = data.get('raster_description') or ''
+    reference_layer_name = data.get('reference_layer_name') or ''
+    stat_types = data.get('stat_types') or []
+    results = data.get('results') or []
+
+    try:
+        import reportlab  # noqa: F401
+    except ImportError:
+        return JsonResponse({
+            'error': 'ReportLab is not installed. Run '
+                     '`pip install reportlab` in your environment.'
+        }, status=500)
+
+    pdf_buf = io.BytesIO()
+    try:
+        _build_statistics_pdf(
+            pdf_buf, description, full_path, raster_description,
+            reference_layer_name, stat_types, results,
+        )
+    except Exception:
+        logger.exception('report_statistics PDF build failed')
+        return JsonResponse({'error': 'Could not generate PDF.'}, status=500)
+    pdf_buf.seek(0)
+
+    response = HttpResponse(pdf_buf.read(), content_type='application/pdf')
+    safe_name = re.sub(r'[^\w\-]+', '_', description)[:60] or 'statistics_report'
+    response['Content-Disposition'] = f'attachment; filename="{safe_name}.pdf"'
+    return response
 
 
 def _parse_esri_metadata(full_path: str) -> dict:

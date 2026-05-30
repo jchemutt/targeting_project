@@ -688,6 +688,83 @@ $(document).ready(function () {
   }
 
   /* =========================
+     PDF report export
+  ========================= */
+  function renderReportButton(resultPath, description, rasterParameters, aoiStr) {
+    let container = document.getElementById('resultReportLinks');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'resultReportLinks';
+      container.className = 'mt-2';
+      const resultSection = document.getElementById('resultSection');
+      if (resultSection) resultSection.appendChild(container);
+    }
+    container.innerHTML =
+      `<button type="button" id="exportReportBtn" class="btn btn-outline-success btn-sm btn-block">
+         <i class="fas fa-file-pdf"></i> Export PDF report
+       </button>`;
+    document.getElementById('exportReportBtn').addEventListener('click',
+      () => exportReport(resultPath, description, rasterParameters, aoiStr));
+  }
+
+  function exportReport(resultPath, description, rasterParameters, aoiStr) {
+    if (!API.reportSuitability) return;
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+    // Flatten rasterParameters (keyed by file path) into a list ordered by
+    // the current card order so the table matches the on-screen grouping.
+    const criteria = [];
+    document.querySelectorAll('#rasterCards .criteria-card').forEach((card) => {
+      const fp = card.getAttribute('data-original-filepath');
+      const params = rasterParameters && rasterParameters[fp];
+      if (!params) return;
+      // Derive a short display name from the file path's last segment.
+      const name = (fp || '').split(/[\\/]/).pop();
+      criteria.push({ name, ...params });
+    });
+
+    const btn = document.getElementById('exportReportBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating PDF…';
+    }
+    fetch(API.reportSuitability, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({
+        result_path: resultPath,
+        description: description || 'Suitability analysis',
+        criteria,
+        aoi: aoiStr || '',
+      }),
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+          throw new Error(j.error || 'Report generation failed');
+        }
+        return r.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = (description || 'suitability_report').replace(/[^\w-]+/g, '_').slice(0, 60);
+        a.download = safeName + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch((err) => alert('Could not generate PDF: ' + err.message))
+      .finally(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-file-pdf"></i> Export PDF report';
+        }
+      });
+  }
+
+  /* =========================
      Layer metadata viewer
   ========================= */
   function metaNum(v) {
@@ -1132,6 +1209,10 @@ $(document).ready(function () {
                 MapLayers.addLayer(data.result_path, "Suitability result",
                                    { source: "result", opacity: 0.85 });
                 renderChainLink(data.result_path);
+                renderReportButton(data.result_path,
+                                   formData.description,
+                                   formData.rasterParameters,
+                                   formData.aoi);
               }
 
               $('html, body').animate({
