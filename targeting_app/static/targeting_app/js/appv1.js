@@ -105,14 +105,63 @@ function addGeoJSONToMap(fc, map, drawnItems) {
   }
 }
 
+/**
+ * Geodesic area of a single closed ring on a sphere (Earth), in km².
+ * Uses the spherical-excess approximation that's accurate to fractions of
+ * a percent for the AOI sizes this tool typically handles.
+ * ``ring`` is an array of ``[lng, lat]`` pairs.
+ */
+function geodesicAreaKm2(ring) {
+  if (!Array.isArray(ring) || ring.length < 4) return 0;
+  const R = 6378137; // WGS84 equatorial radius (m)
+  const toRad = (d) => (d * Math.PI) / 180;
+  let s = 0;
+  for (let i = 0, n = ring.length; i < n - 1; i++) {
+    const [lng1, lat1] = ring[i];
+    const [lng2, lat2] = ring[i + 1];
+    s += toRad(lng2 - lng1) * (2 + Math.sin(toRad(lat1)) + Math.sin(toRad(lat2)));
+  }
+  return Math.abs(s * R * R / 2) / 1e6; // m² -> km²
+}
+
+/** Total area in km² for an arbitrary GeoJSON FeatureCollection of polygons. */
+function aoiAreaKm2(fc) {
+  if (!fc || !fc.features) return 0;
+  let total = 0;
+  for (const f of fc.features) {
+    const g = f && f.geometry;
+    if (!g) continue;
+    if (g.type === "Polygon") {
+      for (const ring of g.coordinates) total += geodesicAreaKm2(ring);
+    } else if (g.type === "MultiPolygon") {
+      for (const poly of g.coordinates) {
+        for (const ring of poly) total += geodesicAreaKm2(ring);
+      }
+    }
+  }
+  return total;
+}
+
 function setAOI(fc, map, drawnItems, aoiInput, aoiStatusEl) {
   const cleaned = validateFeatureCollection(fc);
   addGeoJSONToMap(cleaned, map, drawnItems);
   aoiInput.value = JSON.stringify(cleaned);
 
   if (aoiStatusEl) {
-    aoiStatusEl.textContent = `AOI loaded: ${cleaned.features.length} polygon(s).`;
+    const km2 = aoiAreaKm2(cleaned);
+    const areaTxt = km2 >= 1
+      ? `${Math.round(km2).toLocaleString()} km²`
+      : km2 > 0 ? `${km2.toFixed(2)} km²` : "";
+    aoiStatusEl.textContent =
+      `AOI loaded: ${cleaned.features.length} polygon(s)`
+      + (areaTxt ? ` · ${areaTxt}` : "")
+      + ".";
   }
+  // Enable the Download AOI button now that there's something to download.
+  const dl = document.getElementById("downloadAoiBtn");
+  if (dl) dl.disabled = false;
+  // Refresh the criteria-card histograms now that we have an AOI to query.
+  window.__suitAoiHist?.refreshAll();
 }
 
 function clearAOI(drawnItems, aoiInput, aoiStatusEl) {
@@ -121,6 +170,9 @@ function clearAOI(drawnItems, aoiInput, aoiStatusEl) {
   if (aoiStatusEl) {
     aoiStatusEl.textContent = "No AOI selected. Draw on the map or upload a file.";
   }
+  const dl = document.getElementById("downloadAoiBtn");
+  if (dl) dl.disabled = true;
+  window.__suitAoiHist?.clearAll();
 }
 
 async function parseKMLToGeoJSON(kmlText) {
@@ -305,6 +357,32 @@ $(document).ready(function () {
       clearAOI(drawnItems, aoiInput, aoiStatusEl);
       const f = document.getElementById("aoiFileUpload");
       if (f) f.value = "";
+    });
+  }
+
+  // Download the current AOI as a .geojson file the user can save / share.
+  const downloadAoiBtn = document.getElementById("downloadAoiBtn");
+  if (downloadAoiBtn) {
+    downloadAoiBtn.addEventListener("click", () => {
+      const fc = aoiInput.value;
+      if (!fc) return;
+      const blob = new Blob([fc], { type: "application/geo+json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "aoi.geojson";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  // Live search over the loaded data-layers tree.
+  const layerSearchInput = document.getElementById("layerSearchInput");
+  if (layerSearchInput && fileListElement) {
+    layerSearchInput.addEventListener("input", () => {
+      DirectoryBrowser.filter(fileListElement, layerSearchInput.value);
     });
   }
 
@@ -538,7 +616,12 @@ $(document).ready(function () {
       const parts = [
         '<div class="map-layers-head"><i class="fas fa-layer-group"></i>Map layers</div>',
       ];
-      active.forEach((entry, filePath) => {
+      // Render newest-first so a layer just added appears at the top of the
+      // list (matches how Leaflet stacks rasters on the map: most recent on
+      // top). ``Map.forEach`` iterates in insertion order; reverse via
+      // ``Array.from`` so we get reverse-insertion order without mutating
+      // the underlying Map.
+      Array.from(active.entries()).reverse().forEach(([filePath, entry]) => {
         const fpAttr = encodeURIComponent(filePath);
         const safeName = escapeHtml(entry.fileName);
         let statusHtml;
@@ -840,11 +923,140 @@ $(document).ready(function () {
     }
   }
 
+  /* =========================
+     AOI histogram — fetch + draw a value-distribution histogram inside the
+     trapezoid slider for each criteria card, so the user can pick min /
+     opt_from / opt_to / max with awareness of the data in their AOI.
+
+     Bars live in the ``<svg class="trap-hist">`` element behind the
+     trapezoid SVG; ``axisMin`` / ``axisMax`` come from data-attributes
+     populated by ``TrapSlider.init``. We cache responses keyed on the AOI
+     JSON + raster path so flipping back to the same AOI is instant.
+  ========================= */
+  const AoiHist = (function () {
+    const cache = new Map();   // key -> { bins, edges, min, max }
+    const inflight = new Map();
+    // Per-card global histogram (from raster_meta) so we can restore it
+    // when the AOI is cleared instead of leaving the slider blank.
+    const globals = new WeakMap();
+
+    function cacheKey(filePath, aoiStr) { return `${filePath}\u0001${aoiStr}`; }
+
+    function clear(card) {
+      const svg = card.querySelector('.trap-hist');
+      if (svg) svg.innerHTML = '';
+    }
+
+    function clearAll() {
+      // Restore each card's stored global histogram (if we have one) so
+      // clearing the AOI doesn't leave the trapezoid sliders bare.
+      document.querySelectorAll('#rasterCards .criteria-card').forEach((card) => {
+        const g = globals.get(card);
+        if (g) draw(card, g);
+        else   clear(card);
+      });
+    }
+
+    function drawGlobal(card, bins, edges) {
+      // Stash the global so clearAll can restore it later.
+      const hist = { bins, edges };
+      globals.set(card, hist);
+      // Only render if the card isn't currently showing AOI bars.
+      const aoiStr = document.getElementById('aoiInput')?.value || '';
+      if (!aoiStr) draw(card, hist);
+    }
+
+    function draw(card, hist) {
+      const svg = card.querySelector('.trap-hist');
+      if (!svg) return;
+      svg.innerHTML = '';
+      if (!hist || !hist.bins || !hist.bins.length || !hist.edges
+          || hist.edges.length < 2) return;
+
+      const axisMin = parseFloat(card.dataset.axisMin);
+      const axisMax = parseFloat(card.dataset.axisMax);
+      if (!isFinite(axisMin) || !isFinite(axisMax) || axisMax <= axisMin) return;
+      const span = axisMax - axisMin;
+
+      const maxCount = Math.max(...hist.bins);
+      if (!maxCount) return;
+      // Bars take up to 70% of the slider height (top 30% reserved for
+      // the trapezoid silhouette / handles).
+      const MAX_H = 70;
+
+      const ns = 'http://www.w3.org/2000/svg';
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < hist.bins.length; i++) {
+        const e0 = hist.edges[i];
+        const e1 = hist.edges[i + 1];
+        if (!isFinite(e0) || !isFinite(e1)) continue;
+        // Skip bars that fall entirely outside the slider's axis range.
+        if (e1 <= axisMin || e0 >= axisMax) continue;
+        const x0 = Math.max(0, ((Math.max(e0, axisMin) - axisMin) / span) * 100);
+        const x1 = Math.min(100, ((Math.min(e1, axisMax) - axisMin) / span) * 100);
+        const w = Math.max(0.1, x1 - x0);
+        const h = (hist.bins[i] / maxCount) * MAX_H;
+        const y = 100 - h;
+        const rect = document.createElementNS(ns, 'rect');
+        rect.setAttribute('x', String(x0));
+        rect.setAttribute('y', String(y));
+        rect.setAttribute('width', String(w));
+        rect.setAttribute('height', String(h));
+        frag.appendChild(rect);
+      }
+      svg.appendChild(frag);
+    }
+
+    async function refreshCard(card, aoiStr) {
+      const filePath = card.getAttribute('data-original-filepath');
+      if (!filePath || !aoiStr) { clear(card); return; }
+      const key = cacheKey(filePath, aoiStr);
+      if (cache.has(key)) { draw(card, cache.get(key)); return; }
+      if (!API.aoiHistogram) return;
+
+      // Coalesce repeated requests for the same key while one is in flight.
+      let p = inflight.get(key);
+      if (!p) {
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+        p = fetch(API.aoiHistogram, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+          body: JSON.stringify({ path: filePath, aoi: aoiStr, bins: 30 }),
+        }).then((r) => r.ok ? r.json() : null)
+          .catch(() => null)
+          .finally(() => inflight.delete(key));
+        inflight.set(key, p);
+      }
+      const hist = await p;
+      if (hist && !hist.error) {
+        cache.set(key, hist);
+        draw(card, hist);
+      }
+    }
+
+    function refreshAll() {
+      const aoiStr = document.getElementById('aoiInput')?.value || '';
+      const cards = document.querySelectorAll('#rasterCards .criteria-card');
+      if (!aoiStr) { clearAll(); return; }
+      cards.forEach((card) => refreshCard(card, aoiStr));
+    }
+
+    return { refreshAll, refreshCard, drawGlobal, clear, clearAll };
+  })();
+  // ``setAOI`` and ``clearAOI`` live at module top scope (they run during
+  // boot before this IIFE finishes), so expose AoiHist on ``window`` for
+  // them to find.
+  window.__suitAoiHist = AoiHist;
+
   const TrapSlider = (function () {
     const ORDER = ["min_val", "opti_from", "opti_to", "max_val"];
 
     function init(cardEl, axisMin, axisMax) {
       if (!(axisMax > axisMin)) axisMax = axisMin + 1;
+      // Expose the axis range so AoiHist can scale histogram bars to the
+      // same x-coordinate space the trapezoid handles use.
+      cardEl.dataset.axisMin = String(axisMin);
+      cardEl.dataset.axisMax = String(axisMax);
       const range = axisMax - axisMin;
       const dec = range >= 100 ? 0 : range >= 10 ? 1 : range >= 1 ? 2 : 4;
       const round = (v) => { const f = Math.pow(10, dec); return Math.round(v * f) / f; };
@@ -980,14 +1192,19 @@ $(document).ready(function () {
         </span>
       </div>
       <div class="trap-slider" title="Drag the handles to set the suitability trapezoid">
+        <svg class="trap-hist" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
         <svg class="trap-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
           <polygon class="trap-shape" points=""></polygon>
         </svg>
         <div class="trap-baseline"></div>
-        <div class="trap-handle" data-role="min_val" tabindex="0" title="Minimum — suitability 0 below this"></div>
-        <div class="trap-handle is-opt" data-role="opti_from" tabindex="0" title="Optimal from — full suitability"></div>
-        <div class="trap-handle is-opt" data-role="opti_to" tabindex="0" title="Optimal to — full suitability"></div>
-        <div class="trap-handle" data-role="max_val" tabindex="0" title="Maximum — suitability 0 above this"></div>
+        <div class="trap-handle" data-role="min_val" tabindex="0"
+             title="Minimum — values below this point score 0 (unsuitable). Drag to set the lower cut-off."></div>
+        <div class="trap-handle is-opt" data-role="opti_from" tabindex="0"
+             title="Optimal from — values from here up to ‘Opt to’ score 1 (fully suitable). Defines the start of the optimum band."></div>
+        <div class="trap-handle is-opt" data-role="opti_to" tabindex="0"
+             title="Optimal to — values from ‘Opt from’ up to here score 1 (fully suitable). Defines the end of the optimum band."></div>
+        <div class="trap-handle" data-role="max_val" tabindex="0"
+             title="Maximum — values above this point score 0 (unsuitable). Drag to set the upper cut-off."></div>
       </div>
       <div class="trap-fields">
         <label>Min<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][min_val]" value="${aMin}"></label>
@@ -1018,6 +1235,19 @@ $(document).ready(function () {
 
     TrapSlider.init(card, aMin, aMax);
     updateCombineOptions();
+
+    // Show the global value-distribution histogram from the raster meta
+    // we already fetched. Picks up an AOI-scoped histogram below if one
+    // is set; otherwise this stays as the layer's overall distribution.
+    if (fetchedMeta && Array.isArray(fetchedMeta.hist_bins)
+        && Array.isArray(fetchedMeta.hist_edges)) {
+      AoiHist.drawGlobal(card, fetchedMeta.hist_bins, fetchedMeta.hist_edges);
+    }
+
+    // If an AOI is already drawn, populate this card's histogram now so the
+    // user doesn't have to redraw the AOI to see the data distribution.
+    const aoiStr = document.getElementById('aoiInput')?.value || '';
+    if (aoiStr) AoiHist.refreshCard(card, aoiStr);
 
     // Preview this layer on the main map (async — non-blocking).
     // Preview this layer on the main map (async — non-blocking). Reuse the

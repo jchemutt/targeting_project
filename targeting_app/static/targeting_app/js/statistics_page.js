@@ -264,7 +264,8 @@ document.addEventListener('DOMContentLoaded', function () {
       el.style.display = "block";
 
       const parts = ['<div class="map-layers-head"><i class="fas fa-layer-group"></i>Map layers</div>'];
-      active.forEach((entry, fp) => {
+      // Newest-first ordering, matching Leaflet's draw order on the map.
+      Array.from(active.entries()).reverse().forEach(([fp, entry]) => {
         const safeName = escHtml(entry.fileName || fp);
         const fpAttr = encodeURIComponent(fp);
         let statusHtml;
@@ -691,20 +692,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ----- PDF report -----
   function renderReportButton(results, statTypes) {
-    let container = document.getElementById('resultReportLinks');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'resultReportLinks';
-      container.className = 'mt-2';
-      const resultsSection = document.getElementById('resultsSection');
-      if (resultsSection) resultsSection.appendChild(container);
+    // Put the button in the SAME row as Download CSV / Plot so it stays
+    // visible above the table; appending it inside ``#resultsSection``
+    // pushed it below the table where it could be scrolled out of view.
+    const actions = document.querySelector('#resultsSection .results-actions');
+    if (!actions) return;
+    let btn = document.getElementById('exportReportBtn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'exportReportBtn';
+      btn.className = 'btn btn-outline-success btn-sm ml-2';
+      actions.appendChild(btn);
     }
-    container.innerHTML =
-      `<button type="button" id="exportReportBtn" class="btn btn-outline-success btn-sm">
-         <i class="fas fa-file-pdf"></i> Export PDF report
-       </button>`;
-    document.getElementById('exportReportBtn').addEventListener('click',
-      () => exportReport(results, statTypes));
+    btn.innerHTML = '<i class="fas fa-file-pdf"></i> Export PDF report';
+    btn.style.display = 'inline-block';
+    btn.onclick = () => exportReport(results, statTypes);
   }
 
   function exportReport(results, statTypes) {
@@ -822,6 +825,23 @@ document.addEventListener('DOMContentLoaded', function () {
   async function init() {
     setupMap();
     await displayUserFiles();
+
+    // Live search over the processed-files table — filters by description
+    // (which is what users will recognise).
+    const filesSearchInput = document.getElementById('filesSearchInput');
+    const tableBody = document.getElementById('userFilesTableBody');
+    if (filesSearchInput && tableBody) {
+      filesSearchInput.addEventListener('input', () => {
+        const q = filesSearchInput.value.trim().toLowerCase();
+        tableBody.querySelectorAll('tr').forEach((row) => {
+          if (!q) { row.style.display = ''; return; }
+          // First cell holds the description; fall back to whole-row text
+          // so country / created columns also participate in the match.
+          const haystack = row.textContent.toLowerCase();
+          row.style.display = haystack.includes(q) ? '' : 'none';
+        });
+      });
+    }
 
     // Chain-link from suitability / similarity: ?file=<path> pre-selects the
     // matching processed-file radio. Tolerant of leading /media/ or data/.

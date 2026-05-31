@@ -24,6 +24,8 @@
         <aside class="suit-panel panel-layers">
             <div class="panel-head"><i class="fas fa-layer-group"></i>Data layers</div>
             <div class="panel-body">
+                <input type="text" id="layerSearchInput" class="form-control form-control-sm mb-2"
+                       placeholder="Search layers…" autocomplete="off">
                 <div id="fileList"></div>
             </div>
         </aside>
@@ -41,7 +43,12 @@
 
         {# ---------- BOTTOM: selected data / criteria ---------- #}
         <section class="suit-panel panel-table">
-            <div class="panel-head"><i class="fas fa-table"></i>Selected data &mdash; suitability criteria</div>
+            <div class="panel-head">
+                <i class="fas fa-table"></i>Selected data &mdash; suitability criteria
+                <i class="fas fa-info-circle ml-2"
+                   style="color:var(--tt-green-dark); cursor:help; font-size:.9em;"
+                   title="Each card defines a trapezoid suitability function for one input layer. Min / Max are the lower and upper cut-offs (score 0 outside this range). Opt from / Opt to bracket the optimal band (score 1 inside). Between the two pairs, suitability ramps linearly from 0 to 1. Drag the handles, or type in the boxes below. The histogram behind each slider shows the value distribution inside your AOI (or the whole layer if no AOI is set)."></i>
+            </div>
             <div class="panel-body">
                 <div id="rasterCards" class="criteria-cards">
                     <!-- A criteria card with a trapezoid slider is added per selected layer -->
@@ -75,6 +82,12 @@
                         <small id="aoiStatus" class="text-muted aoi-status flex-grow-1">
                             No AOI selected. Draw on the map or upload a file.
                         </small>
+                        <button type="button" id="downloadAoiBtn"
+                                class="btn btn-outline-secondary btn-sm ml-2"
+                                title="Download the current AOI as GeoJSON"
+                                disabled>
+                            <i class="fas fa-download"></i> GeoJSON
+                        </button>
                         <button type="button" id="clearAoiBtn"
                                 class="btn btn-outline-secondary btn-sm ml-2">
                             Clear AOI

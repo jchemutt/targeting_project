@@ -299,6 +299,23 @@
     vector-effect: non-scaling-stroke;
 }
 
+/* AOI histogram (renders behind the trapezoid, so the user can read the
+   data distribution inside the AOI while picking thresholds). The bars are
+   muted grey-green and sit at the bottom of the slider so the trapezoid
+   line on top stays the dominant visual element. */
+.trap-hist {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+.trap-hist rect {
+    fill: rgba(95, 111, 100, 0.38);
+}
+.trap-svg { z-index: 1; }
+.trap-handle { z-index: 2; }
+
 .trap-baseline {
     position: absolute;
     left: 0;

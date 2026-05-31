@@ -52,6 +52,9 @@
   function renderFolder(li, item, directoryPath, opts) {
     const childPath = `${directoryPath}/${item.name}`;
     li.classList.add("folder");
+    // Expose the bare name on the dataset so the search filter can match
+    // against it without parsing the rendered icons out of innerHTML.
+    li.dataset.name = item.name;
     li.style.cursor = "pointer";
     li.innerHTML =
       '<i class="fas fa-caret-right folder-icon mr-2"></i>' +
@@ -96,6 +99,7 @@
   function renderFile(li, item, directoryPath, opts) {
     const filePath = `${directoryPath}/${item.name}`;
     li.classList.add("file");
+    li.dataset.name = item.name;
 
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
@@ -170,8 +174,58 @@
     buildTree(contents, opts.container, rootPath, opts);
   }
 
+  /** Filter the rendered tree by ``query`` (case-insensitive, matches the
+   *  item name). Hides non-matching items and reveals ancestor folders
+   *  of matches. Auto-expands folders that contain matches.
+   *
+   *  Limitation: the tree is lazy-loaded — only what the user has already
+   *  expanded participates in the search. This is intentional v1 behaviour;
+   *  pre-fetching every country folder on page load would defeat the lazy
+   *  load. The search input UI should hint at this.
+   */
+  function filter(container, query) {
+    query = (query || "").trim().toLowerCase();
+    const lis = container.querySelectorAll("li");
+    if (!query) {
+      lis.forEach((li) => { li.style.display = ""; });
+      return;
+    }
+    // Mark every li as hidden-by-default, then unhide matches and their
+    // ancestor chain.
+    lis.forEach((li) => { li.dataset._hide = "1"; });
+    lis.forEach((li) => {
+      const name = (li.dataset.name || "").toLowerCase();
+      if (name && name.includes(query)) {
+        let cur = li;
+        while (cur && cur !== container) {
+          if (cur.tagName === "LI") {
+            delete cur.dataset._hide;
+            // Auto-expand ancestor folders so the match is visible.
+            if (cur.classList.contains("folder")
+                && !cur.classList.contains("expanded")) {
+              const fc = cur.querySelector(".folder-content");
+              const icon = cur.querySelector(".folder-icon");
+              if (fc) fc.style.display = "block";
+              if (icon) {
+                icon.classList.remove("fa-caret-right");
+                icon.classList.add("fa-caret-down");
+              }
+              cur.classList.add("expanded");
+            }
+          }
+          cur = cur.parentElement;
+        }
+      }
+    });
+    lis.forEach((li) => {
+      li.style.display = li.dataset._hide ? "none" : "";
+      delete li.dataset._hide;
+    });
+  }
+
   window.DirectoryBrowser = {
     render: render,
+    filter: filter,
     sanitizeFilePath: sanitizeFilePath,
     fetchDirectoryContents: fetchDirectoryContents,
     fetchFolderConfigurations: fetchFolderConfigurations,

@@ -65,6 +65,7 @@ def _js_config():
             'reportSuitability': reverse('report_suitability'),
             'reportSimilarity': reverse('report_similarity'),
             'reportStatistics': reverse('report_statistics'),
+            'aoiHistogram': reverse('aoi_histogram'),
         },
         'pages': {
             'statistics': reverse('statistics'),
@@ -292,8 +293,29 @@ def _get_raster_info(full_path: str):
                     dmin, dmax = vmin, vmax
                 data_range = (dmin, dmax)
 
+            # Global value-distribution histogram for the criteria-card
+            # slider — computed from the same downsampled read so it
+            # comes essentially free, no extra reader pass. Binned over
+            # ``data_range`` so the bars align with the slider's axis.
+            hist_bins, hist_edges = None, None
+            try:
+                drange_min, drange_max = float(data_range[0]), float(data_range[1])
+                if drange_max > drange_min:
+                    # Clip the downsampled valid pixels to the data-range
+                    # window before histogramming so an outlier doesn't
+                    # squish every meaningful bar into one bin.
+                    in_range = valid[(valid >= drange_min) & (valid <= drange_max)]
+                    if in_range.size:
+                        counts, edges = np.histogram(in_range, bins=30,
+                                                     range=(drange_min, drange_max))
+                        hist_bins = counts.astype(int).tolist()
+                        hist_edges = [float(e) for e in edges]
+            except Exception:
+                logger.exception('Histogram computation failed for %s', full_path)
+
             info = {'range': (vmin, vmax), 'nodata': nodata,
-                    'data_range': data_range}
+                    'data_range': data_range,
+                    'hist_bins': hist_bins, 'hist_edges': hist_edges}
     except Exception:
         logger.exception('Failed to read raster info for %s', full_path)
         info = None
@@ -399,6 +421,8 @@ def raster_meta(request):
             'maxzoom': maxz,
             'range': value_range,
             'data_range': data_range,
+            'hist_bins':  info.get('hist_bins')  if info else None,
+            'hist_edges': info.get('hist_edges') if info else None,
         })
     except Exception as exc:
         logger.exception('raster_meta failed for %s', full_path)
@@ -559,10 +583,17 @@ def _report_styles():
 
 
 def _result_image_flowable(raster_path, cmap='rdylgn', invert=False,
-                            max_w_cm=17.0, max_h_cm=11.0):
+                            max_w_cm=17.0, max_h_cm=11.0,
+                            aoi_str=None, points=None):
     """Render a result raster via rio-tiler and return a ReportLab Image
     flowable, sized to fit (max_w_cm x max_h_cm) preserving aspect ratio.
-    Returns ``None`` if rendering fails (callers should put a placeholder).
+
+    Optional overlays:
+    - ``aoi_str``: GeoJSON string. Draws the polygon outline on the image
+      so the AOI's footprint is visible against the raster.
+    - ``points``: iterable of ``[lng, lat]`` pairs. Draws white-haloed red
+      dots at each sample-point location (used by the Similarity report).
+    Overlay failures degrade gracefully — the un-overlayed PNG is used.
     """
     from reportlab.lib.units import cm
     from reportlab.platypus import Image as RLImage
@@ -574,6 +605,10 @@ def _result_image_flowable(raster_path, cmap='rdylgn', invert=False,
         vmax = vmin + 1.0
     png = _render_result_png(raster_path, vmin, vmax,
                              invert=invert, cmap=cmap)
+    if aoi_str:
+        png = _draw_aoi_overlay(png, raster_path, aoi_str)
+    if points:
+        png = _draw_points_overlay(png, raster_path, points)
     buf = io.BytesIO(png)
     with _PIL.open(buf) as test:
         iw, ih = test.size
@@ -584,6 +619,262 @@ def _result_image_flowable(raster_path, cmap='rdylgn', invert=False,
     else:
         w_cm, h_cm = max_h_cm * aspect, max_h_cm
     return RLImage(buf, width=w_cm * cm, height=h_cm * cm)
+
+
+def _aoi_geometries(aoi_value):
+    """Flatten an AOI of any shape (FeatureCollection / Feature / Geometry)
+    to a list of bare GeoJSON geometry dicts. Returns ``[]`` for invalid
+    input.
+    """
+    if isinstance(aoi_value, str):
+        try:
+            aoi = json.loads(aoi_value)
+        except Exception:
+            return []
+    else:
+        aoi = aoi_value
+    geometries = []
+
+    def _walk(node):
+        if isinstance(node, dict):
+            t = node.get('type')
+            if t == 'FeatureCollection':
+                for f in node.get('features') or []:
+                    _walk(f)
+            elif t == 'Feature':
+                _walk(node.get('geometry'))
+            elif node.get('coordinates') is not None and node.get('type'):
+                geometries.append(node)
+        elif isinstance(node, list):
+            for child in node:
+                _walk(child)
+
+    _walk(aoi)
+    return geometries
+
+
+def _draw_aoi_overlay(png_bytes: bytes, raster_path: str, aoi_str: str) -> bytes:
+    """Draw the AOI polygon outline over a rendered raster PNG. Returns
+    modified PNG bytes (original bytes on any failure)."""
+    geometries = _aoi_geometries(aoi_str)
+    if not geometries:
+        return png_bytes
+    try:
+        from PIL import Image, ImageDraw
+        import rasterio
+        from rasterio.crs import CRS
+        from rasterio.warp import transform_geom
+
+        with rasterio.open(raster_path) as src:
+            bounds = src.bounds
+            wgs84 = CRS.from_epsg(4326)
+            if src.crs is not None and src.crs != wgs84:
+                geometries = [transform_geom(wgs84, src.crs, g)
+                              for g in geometries]
+
+        img = Image.open(io.BytesIO(png_bytes)).convert('RGBA')
+        iw, ih = img.size
+        bw = bounds.right - bounds.left
+        bh = bounds.top - bounds.bottom
+        if bw <= 0 or bh <= 0:
+            return png_bytes
+
+        def geo_to_px(x, y):
+            return ((x - bounds.left) / bw * iw,
+                    (bounds.top - y) / bh * ih)
+
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        # Warm orange outline reads well over rdylgn / viridis.
+        line_color = (240, 100, 30, 255)
+        line_w = max(2, int(min(iw, ih) / 280))
+
+        def draw_ring(coords):
+            if not coords or len(coords) < 2:
+                return
+            pixels = [geo_to_px(c[0], c[1]) for c in coords]
+            if pixels[0] != pixels[-1]:
+                pixels.append(pixels[0])
+            draw.line(pixels, fill=line_color, width=line_w, joint='curve')
+
+        for g in geometries:
+            t = g.get('type')
+            coords = g.get('coordinates', [])
+            if t == 'Polygon':
+                for ring in coords:
+                    draw_ring(ring)
+            elif t == 'MultiPolygon':
+                for poly in coords:
+                    for ring in poly:
+                        draw_ring(ring)
+            elif t in ('LineString',):
+                draw_ring(coords)
+            elif t == 'MultiLineString':
+                for line in coords:
+                    draw_ring(line)
+
+        out = Image.alpha_composite(img, overlay)
+        buf = io.BytesIO()
+        out.save(buf, 'PNG')
+        return buf.getvalue()
+    except Exception:
+        logger.exception('AOI overlay failed for %s', raster_path)
+        return png_bytes
+
+
+def _draw_points_overlay(png_bytes: bytes, raster_path: str, points) -> bytes:
+    """Draw small white-haloed dots at sample-point locations over a
+    rendered PNG. Used by the Similarity report.
+    """
+    if not points:
+        return png_bytes
+    try:
+        from PIL import Image, ImageDraw
+        import rasterio
+        from rasterio.crs import CRS
+        from rasterio.warp import transform as _rio_transform
+
+        lngs, lats = [], []
+        for p in points:
+            try:
+                lngs.append(float(p[0])); lats.append(float(p[1]))
+            except (TypeError, ValueError, IndexError):
+                continue
+        if not lngs:
+            return png_bytes
+
+        with rasterio.open(raster_path) as src:
+            bounds = src.bounds
+            wgs84 = CRS.from_epsg(4326)
+            if src.crs is not None and src.crs != wgs84:
+                xs, ys = _rio_transform(wgs84, src.crs, lngs, lats)
+            else:
+                xs, ys = lngs, lats
+
+        img = Image.open(io.BytesIO(png_bytes)).convert('RGBA')
+        iw, ih = img.size
+        bw = bounds.right - bounds.left
+        bh = bounds.top - bounds.bottom
+        if bw <= 0 or bh <= 0:
+            return png_bytes
+
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        outer_r = max(5, int(min(iw, ih) / 90))
+        inner_r = max(2, outer_r - 3)
+        halo_color = (255, 255, 255, 230)
+        core_color = (220, 30, 60, 255)
+
+        for x, y in zip(xs, ys):
+            if x < bounds.left or x > bounds.right \
+                    or y < bounds.bottom or y > bounds.top:
+                continue
+            px = (x - bounds.left) / bw * iw
+            py = (bounds.top - y) / bh * ih
+            draw.ellipse([(px - outer_r, py - outer_r),
+                          (px + outer_r, py + outer_r)], fill=halo_color)
+            draw.ellipse([(px - inner_r, py - inner_r),
+                          (px + inner_r, py + inner_r)], fill=core_color)
+
+        out = Image.alpha_composite(img, overlay)
+        buf = io.BytesIO()
+        out.save(buf, 'PNG')
+        return buf.getvalue()
+    except Exception:
+        logger.exception('Points overlay failed for %s', raster_path)
+        return png_bytes
+
+
+def _compute_class_breakdown(raster_path: str, aoi_str: str = ''):
+    """Count pixels per integer class (1..5) within the AOI, or across the
+    full raster (downsampled) if no AOI is set. Returns ``{1: n, 2: n, ...}``
+    or ``None`` if computation fails.
+    """
+    try:
+        import numpy as np
+        import rasterio
+
+        geometries = _aoi_geometries(aoi_str) if aoi_str else []
+        with rasterio.open(raster_path) as src:
+            if geometries:
+                from rasterio.mask import mask as rio_mask
+                from rasterio.crs import CRS
+                from rasterio.warp import transform_geom
+                wgs84 = CRS.from_epsg(4326)
+                if src.crs is not None and src.crs != wgs84:
+                    try:
+                        geometries = [transform_geom(wgs84, src.crs, g)
+                                      for g in geometries]
+                    except Exception:
+                        geometries = None
+                try:
+                    out_image, _ = rio_mask(src, geometries, crop=True,
+                                            filled=False, indexes=1)
+                    arr = np.asarray(out_image).ravel()
+                    if hasattr(out_image, 'mask') and out_image.mask is not False:
+                        arr = arr[~np.asarray(out_image.mask).ravel()]
+                except ValueError:
+                    return None
+            else:
+                h, w = src.height, src.width
+                scale = max(1, max(h, w) // 1024)
+                out_h, out_w = max(1, h // scale), max(1, w // scale)
+                band = src.read(1, masked=True, out_shape=(out_h, out_w))
+                arr = band.compressed()
+
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                return None
+            arr_int = np.rint(arr).astype(int)
+            return {c: int(np.sum(arr_int == c)) for c in range(1, 6)}
+    except Exception:
+        logger.exception('class breakdown failed for %s', raster_path)
+        return None
+
+
+def _class_breakdown_drawing(class_counts):
+    """Build a small horizontal-bar chart of the 5-class breakdown. Each
+    row: label, bar (coloured by class), percentage. Returns a ReportLab
+    Drawing, or ``None`` if the counts are empty.
+    """
+    from reportlab.graphics.shapes import Drawing, Rect, String
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+
+    total = sum(class_counts.values()) if class_counts else 0
+    if not total:
+        return None
+
+    labels = ['Very low', 'Low', 'Moderate', 'High', 'Very high']
+    bar_cols = ['#d73027', '#fc8d59', '#fee08b', '#91cf60', '#1a9850']
+
+    width  = 17.0 * cm
+    height = 4.6 * cm
+    label_w = 2.2 * cm
+    pct_w   = 1.4 * cm
+    bar_max = width - label_w - pct_w - 0.4 * cm
+    row_h   = height / 5
+    bar_h   = row_h - 4
+
+    d = Drawing(width, height)
+    for i, c in enumerate(range(1, 6)):
+        n = class_counts.get(c, 0)
+        pct = n / total * 100
+        bar_len = (pct / 100) * bar_max
+        # Rows from top to bottom (class 1 at top).
+        row_top = height - (i * row_h)
+        y_bar = row_top - row_h + 2
+        y_text = y_bar + bar_h / 2 - 3
+        d.add(String(0, y_text, f'{c} — {labels[i]}',
+                     fontSize=8.5, fillColor=colors.HexColor('#1f2d24')))
+        d.add(Rect(label_w, y_bar, bar_max, bar_h,
+                   fillColor=colors.HexColor('#f1f3f1'), strokeColor=None))
+        d.add(Rect(label_w, y_bar, bar_len, bar_h,
+                   fillColor=colors.HexColor(bar_cols[i]), strokeColor=None))
+        d.add(String(label_w + bar_max + 4, y_text,
+                     f'{pct:5.1f}%' if pct >= 0.1 else '<0.1%',
+                     fontSize=8.5, fillColor=colors.HexColor('#1f2d24')))
+    return d
 
 
 def _fmt_num_for_pdf(v):
@@ -608,17 +899,35 @@ def _xml_escape_for_pdf(s) -> str:
 
 def _aoi_summary_text(aoi_str: str):
     """Walk a GeoJSON Feature / FeatureCollection / Geometry and return a
-    short HTML-ish summary of its bounding box, or ``None`` if empty.
+    short HTML-ish summary of its bounding box and geodesic area, or
+    ``None`` if empty.
     """
     try:
         aoi = json.loads(aoi_str)
     except Exception:
         return None
     coords_flat = []
+    rings = []  # list of [(lng, lat), ...] closed rings, for area calc
+
+    def _push_ring(ring):
+        pts = [(float(c[0]), float(c[1])) for c in ring if len(c) >= 2]
+        if len(pts) >= 3:
+            if pts[0] != pts[-1]:
+                pts.append(pts[0])
+            rings.append(pts)
 
     def _walk(node):
         if isinstance(node, dict):
             geom = node.get('geometry', node)
+            t = geom.get('type') if isinstance(geom, dict) else None
+            coords = geom.get('coordinates') if isinstance(geom, dict) else None
+            if t == 'Polygon' and coords:
+                for ring in coords:
+                    _push_ring(ring)
+            elif t == 'MultiPolygon' and coords:
+                for poly in coords:
+                    for ring in poly:
+                        _push_ring(ring)
             if isinstance(geom, dict) and 'coordinates' in geom:
                 _walk(geom['coordinates'])
             for f in node.get('features') or []:
@@ -636,10 +945,32 @@ def _aoi_summary_text(aoi_str: str):
         return None
     lngs = [c[0] for c in coords_flat]
     lats = [c[1] for c in coords_flat]
+
+    # Geodesic area in km² using the same spherical-excess approximation
+    # the frontend uses, so the value in the side panel and the value in
+    # the PDF match.
+    area_km2 = 0.0
+    for ring in rings:
+        s = 0.0
+        for i in range(len(ring) - 1):
+            lng1, lat1 = ring[i]
+            lng2, lat2 = ring[i + 1]
+            s += math.radians(lng2 - lng1) * (
+                2 + math.sin(math.radians(lat1)) + math.sin(math.radians(lat2)))
+        area_km2 += abs(s * (6378137.0 ** 2) / 2) / 1e6
+
+    if area_km2 >= 1:
+        area_txt = f'{int(round(area_km2)):,} km²'
+    elif area_km2 > 0:
+        area_txt = f'{area_km2:.2f} km²'
+    else:
+        area_txt = ''
+
     return (
         f'Bounding box &nbsp;<b>{min(lngs):.3f}° to {max(lngs):.3f}° E</b>'
         f' &nbsp;·&nbsp; <b>{min(lats):.3f}° to {max(lats):.3f}° N</b>'
         f'<br/>Vertices: {len(coords_flat)}'
+        + (f' &nbsp;·&nbsp; Area: <b>{area_txt}</b>' if area_txt else '')
     )
 
 
@@ -670,7 +1001,8 @@ def _build_suitability_pdf(out_buf, title, raster_path, criteria, aoi_str):
     # Map snapshot
     try:
         img_flow = _result_image_flowable(raster_path, cmap='rdylgn',
-                                          invert=False)
+                                          invert=False,
+                                          aoi_str=aoi_str)
         story.append(img_flow)
         story.append(Paragraph(
             '<font color="#d73027">■</font>'
@@ -679,12 +1011,25 @@ def _build_suitability_pdf(out_buf, title, raster_path, criteria, aoi_str):
             '<font color="#d9ef8b">■</font>'
             '<font color="#66bd63">■</font>'
             '<font color="#1a9850">■</font>'
-            '&nbsp;&nbsp;<i>Low</i> &rarr; <i>High</i> suitability',
+            '&nbsp;&nbsp;<i>Low</i> &rarr; <i>High</i> suitability'
+            + ('&nbsp;&nbsp;·&nbsp;&nbsp;<font color="#f0641e">▬</font> AOI outline'
+               if aoi_str else ''),
             S['caption']))
     except Exception:
         logger.exception('report_suitability map render failed')
         story.append(Paragraph(
             '<i>Map snapshot could not be rendered.</i>', S['caption']))
+
+    # Class breakdown (Distribution by suitability class)
+    breakdown = _compute_class_breakdown(raster_path, aoi_str)
+    if breakdown:
+        story.append(Paragraph(
+            'Distribution by suitability class'
+            + (' (within AOI)' if aoi_str else ' (full extent)'),
+            S['h2']))
+        drawing = _class_breakdown_drawing(breakdown)
+        if drawing is not None:
+            story.append(drawing)
 
     # Criteria table
     if criteria:
@@ -764,7 +1109,8 @@ def _build_similarity_pdf(out_buf, title, mnobis_path, mess_path,
     def _result_cell(path, label, cmap='rdylgn', invert=False):
         try:
             img = _result_image_flowable(path, cmap=cmap, invert=invert,
-                                         max_w_cm=8.2, max_h_cm=8.0)
+                                         max_w_cm=8.2, max_h_cm=8.0,
+                                         points=points)
             cap = Paragraph(label, S['caption'])
             return [img, cap]
         except Exception:
@@ -780,7 +1126,8 @@ def _build_similarity_pdf(out_buf, title, mnobis_path, mess_path,
         '<font color="#d9ef8b">■</font>'
         '<font color="#66bd63">■</font>'
         '<font color="#1a9850">■</font>'
-        '&nbsp;&nbsp;<i>Low</i> &rarr; <i>High</i> similarity')
+        '&nbsp;&nbsp;<i>Low</i> &rarr; <i>High</i> similarity'
+        + ('<br/><font color="#dc1e3c">●</font> Sample points' if points else ''))
 
     cells = []
     if mnobis_path:
@@ -975,10 +1322,33 @@ def _build_statistics_pdf(out_buf, title, raster_path, raster_description,
             for s in stats_used:
                 row.append(_fmt_num_for_pdf((per_class.get(cn) or {}).get(s)))
             rows.append(row)
-        n_cols = len(header)
-        first_w = 4.8 * cm
-        rest_w = (17.0 - 4.8) / max(n_cols - 1, 1) * cm
-        col_widths = [first_w] + [rest_w] * (n_cols - 1)
+        # Compute column widths so wide-valued stats like ``sum`` don't get
+        # squished into a column that fits only "1,2…". Reserve fixed space
+        # for ``sum`` (large totals) and ``mean`` (fractional), share the
+        # remainder between the others.
+        total_w = 17.0
+        class_w  = 4.2
+        area_w   = 2.6
+        wide_stats = {'sum'}
+        med_stats  = {'mean', 'median', 'max', 'min'}
+        wide_per   = 2.2  # cm each
+        med_per    = 1.55
+        small_per  = 1.25
+        n_wide = sum(1 for s in stats_used if s.lower() in wide_stats)
+        n_med  = sum(1 for s in stats_used if s.lower() in med_stats)
+        n_small = max(0, len(stats_used) - n_wide - n_med)
+        used = class_w + area_w + n_wide * wide_per + n_med * med_per + n_small * small_per
+        # Scale down proportionally if we'd overflow the page width.
+        if used > total_w:
+            scale = total_w / used
+            class_w *= scale; area_w *= scale
+            wide_per *= scale; med_per *= scale; small_per *= scale
+        col_widths = [class_w * cm, area_w * cm]
+        for s in stats_used:
+            sl = s.lower()
+            if sl in wide_stats:   col_widths.append(wide_per * cm)
+            elif sl in med_stats:  col_widths.append(med_per * cm)
+            else:                  col_widths.append(small_per * cm)
         t = Table(rows, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), C['green_tint']),
@@ -1149,6 +1519,144 @@ def report_statistics(request):
     safe_name = re.sub(r'[^\w\-]+', '_', description)[:60] or 'statistics_report'
     response['Content-Disposition'] = f'attachment; filename="{safe_name}.pdf"'
     return response
+
+
+# ============================== AOI histogram ==============================
+
+@require_POST
+@csrf_protect
+def aoi_histogram(request):
+    """Compute a histogram of a raster's values WITHIN the user's AOI polygon.
+
+    POST JSON body: ``{path, aoi, bins}`` where ``aoi`` is a GeoJSON
+    FeatureCollection / Feature / Geometry. Returns
+    ``{bins: [counts...], edges: [...], min, max, count_total}``.
+
+    This is used by the Suitability criteria cards to overlay a value-
+    distribution histogram behind the trapezoid slider, so the user can
+    pick min / opt_from / opt_to / max with awareness of what data
+    actually exists in their area of interest.
+    """
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+
+    path_param = data.get('path')
+    aoi_value = data.get('aoi')
+    try:
+        n_bins = int(data.get('bins') or 20)
+    except (TypeError, ValueError):
+        n_bins = 20
+    n_bins = max(5, min(60, n_bins))
+
+    if not path_param or not aoi_value:
+        return JsonResponse({'error': 'path and aoi are required'}, status=400)
+
+    full_path = _resolve_raster_path(path_param)
+    if not full_path:
+        return JsonResponse({'error': 'Raster not found'}, status=404)
+
+    if isinstance(aoi_value, str):
+        try:
+            aoi = json.loads(aoi_value)
+        except Exception:
+            return JsonResponse({'error': 'Invalid AOI JSON'}, status=400)
+    else:
+        aoi = aoi_value
+
+    # Flatten an AOI of any shape (FeatureCollection / Feature / Geometry)
+    # to a list of bare geometry dicts that rasterio.mask understands.
+    geometries = []
+
+    def _walk(node):
+        if isinstance(node, dict):
+            t = node.get('type')
+            if t == 'FeatureCollection':
+                for f in node.get('features') or []:
+                    _walk(f)
+            elif t == 'Feature':
+                _walk(node.get('geometry'))
+            elif node.get('coordinates') is not None and node.get('type'):
+                geometries.append(node)
+        elif isinstance(node, list):
+            for child in node:
+                _walk(child)
+
+    _walk(aoi)
+    if not geometries:
+        return JsonResponse({'error': 'No polygon geometry in AOI'},
+                            status=400)
+
+    import numpy as np
+    import rasterio
+    from rasterio.mask import mask as rio_mask
+    from rasterio.crs import CRS as _CRS
+    from rasterio.warp import transform_geom
+
+    try:
+        with rasterio.open(full_path) as src:
+            # Reproject AOI from WGS84 to the raster's native CRS if needed.
+            wgs84 = _CRS.from_epsg(4326)
+            if src.crs is not None and src.crs != wgs84:
+                try:
+                    geometries = [transform_geom(wgs84, src.crs, g)
+                                  for g in geometries]
+                except Exception:
+                    logger.exception('aoi_histogram: AOI reprojection failed')
+
+            try:
+                out_image, _ = rio_mask(src, geometries, crop=True,
+                                        filled=False, indexes=1)
+            except ValueError:
+                # AOI doesn't overlap the raster's footprint.
+                return JsonResponse({
+                    'bins': [], 'edges': [], 'min': None, 'max': None,
+                    'count_total': 0,
+                })
+
+            # ``out_image`` is a MaskedArray when ``filled=False`` and a
+            # plain ndarray otherwise. Normalise to 1-D of valid floats.
+            arr = np.asarray(out_image).ravel()
+            if hasattr(out_image, 'mask') and out_image.mask is not False:
+                mask_arr = np.asarray(out_image.mask).ravel()
+                arr = arr[~mask_arr]
+            if src.nodata is not None:
+                try:
+                    if math.isnan(src.nodata):
+                        arr = arr[~np.isnan(arr)]
+                    else:
+                        arr = arr[arr != src.nodata]
+                except (TypeError, ValueError):
+                    pass
+            # Drop any residual NaN/inf even if nodata wasn't declared.
+            arr = arr[np.isfinite(arr)]
+
+            if arr.size == 0:
+                return JsonResponse({
+                    'bins': [], 'edges': [], 'min': None, 'max': None,
+                    'count_total': 0,
+                })
+
+            # Cap the sample for speed; with 200k random pixels the histogram
+            # shape is stable to within rounding for any reasonable AOI.
+            if arr.size > 200_000:
+                rng = np.random.default_rng(0)
+                idx = rng.choice(arr.size, 200_000, replace=False)
+                arr = arr[idx]
+
+            counts, edges = np.histogram(arr, bins=n_bins)
+            return JsonResponse({
+                'bins':        counts.astype(int).tolist(),
+                'edges':       [float(e) for e in edges],
+                'min':         float(arr.min()),
+                'max':         float(arr.max()),
+                'count_total': int(arr.size),
+            })
+    except Exception:
+        logger.exception('aoi_histogram failed for %s', full_path)
+        return JsonResponse({'error': 'Failed to compute histogram'},
+                            status=500)
 
 
 def _parse_esri_metadata(full_path: str) -> dict:
@@ -1369,6 +1877,11 @@ def get_directory_contents(request):
                 'min_val': cfg.get('min_val'),
                 'max_val': cfg.get('max_val'),
             })
+
+    # Order alphabetically with directories listed before files, case-
+    # insensitive — so continents/countries/files are predictable regardless
+    # of what order the filesystem happens to return them in.
+    contents.sort(key=lambda c: (c['type'] != 'directory', c['name'].lower()))
 
     return JsonResponse(contents, safe=False)
 

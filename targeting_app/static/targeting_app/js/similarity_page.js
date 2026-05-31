@@ -286,7 +286,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const parts = [
         '<div class="map-layers-head"><i class="fas fa-layer-group"></i>Map layers</div>',
       ];
-      active.forEach((entry, fp) => {
+      // Newest-first ordering, matching Leaflet's draw order on the map.
+      Array.from(active.entries()).reverse().forEach(([fp, entry]) => {
         const safeName = escHtml(entry.fileName || fp);
         const fpAttr = encodeURIComponent(fp);
         let statusHtml;
@@ -736,5 +737,13 @@ document.addEventListener('DOMContentLoaded', () => {
     onFileDeselect: (filePath) => removeSelectedFile(filePath),
     onFileInfo:     (filePath, item) => showLayerMetadata(filePath, item.name, "data"),
   });
+
+  // Live search over the loaded data-layers tree.
+  const layerSearchInput = document.getElementById('layerSearchInput');
+  if (layerSearchInput && fileListElement) {
+    layerSearchInput.addEventListener('input', () => {
+      DirectoryBrowser.filter(fileListElement, layerSearchInput.value);
+    });
+  }
 
 });

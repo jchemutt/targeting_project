@@ -20,6 +20,7 @@ urlpatterns = [
     path('api/reportSuitability', views.report_suitability, name='report_suitability'),
     path('api/reportSimilarity', views.report_similarity, name='report_similarity'),
     path('api/reportStatistics', views.report_statistics, name='report_statistics'),
+    path('api/aoiHistogram', views.aoi_histogram, name='aoi_histogram'),
     path('api/getReferenceLayers', views.get_reference_layers, name='get_reference_layers'),
     path('api/serveRaster', views.serve_raster, name='serve_raster'),
     path('api/tile/<int:z>/<int:x>/<int:y>.png', views.tile_raster, name='tile_raster'),
