@@ -129,6 +129,38 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
+# --- Email & admin alerts -----------------------------------------------------
+# ADMINS in data.json looks like: [["Jane Doe", "jane@example.org"]].
+# Defaults to the console backend (prints emails to stdout) so nothing
+# crashes or silently tries to send real mail when it isn't configured yet;
+# set EMAIL_BACKEND/EMAIL_HOST etc. in data.json for a real deployment.
+ADMINS = [tuple(a) for a in data.get('ADMINS', [])]
+MANAGERS = ADMINS
+EMAIL_BACKEND = data.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = data.get('EMAIL_HOST', '')
+EMAIL_PORT = data.get('EMAIL_PORT', 587)
+EMAIL_HOST_USER = data.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = data.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = data.get('EMAIL_USE_TLS', True)
+DEFAULT_FROM_EMAIL = data.get('DEFAULT_FROM_EMAIL', 'webmaster@localhost')
+SERVER_EMAIL = data.get('SERVER_EMAIL', DEFAULT_FROM_EMAIL)
+
+
+# --- Output retention & storage monitoring ------------------------------------
+# Analysis outputs under media/output/<run>/ are deleted automatically after
+# this many days by the `cleanup_old_outputs` management command (meant to
+# run daily via cron — see that command's docstring for the crontab line).
+# Also read by _js_config() so the "results are kept for N days" notice
+# shown to users always matches the real configured value.
+OUTPUT_RETENTION_DAYS = int(data.get('OUTPUT_RETENTION_DAYS', 14))
+# If free space on the media volume drops below this percentage, or the
+# output folder alone exceeds it as a share of total disk size,
+# cleanup_old_outputs emails ADMINS a warning — so storage running low can
+# be caught and acted on between daily cleanup runs, not discovered only
+# once the disk is actually full.
+STORAGE_ALERT_FREE_PERCENT_THRESHOLD = float(data.get('STORAGE_ALERT_FREE_PERCENT_THRESHOLD', 10))
+
+
 # --- Logging -----------------------------------------------------------------
 # Replaces the ad-hoc print() debugging that used to live in the views.
 LOGGING = {

@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Page views
 # ---------------------------------------------------------------------------
 
-def _js_config():
+def _js_config(request=None):
     """Values handed to the frontend via the ``#js-config`` json_script block.
 
     Endpoint URLs are resolved with ``reverse()`` so the JavaScript never
@@ -48,6 +48,9 @@ def _js_config():
     _tile_sample = reverse('tile_raster', kwargs={'z': 0, 'x': 0, 'y': 0})
     _tile_template = _tile_sample.rsplit('/', 3)[0] + '/{z}/{x}/{y}.png'
 
+    user = getattr(request, 'user', None)
+    can_edit_metadata = bool(user and user.is_authenticated and user.is_staff)
+
     return {
         'apiEndpoints': {
             'directoryContents': reverse('get_directory_contents'),
@@ -57,6 +60,7 @@ def _js_config():
             'tileRaster': _tile_template,
             'rasterMeta': reverse('raster_meta'),
             'layerMetadata': reverse('layer_metadata'),
+            'updateLayerMetadata': reverse('update_layer_metadata'),
             'userFiles': reverse('get_user_files'),
             'processLandSuitability': reverse('process_land_suitability'),
             'processLandSimilarity': reverse('process_land_similarity'),
@@ -72,6 +76,14 @@ def _js_config():
             'suitability': reverse('suitability'),
             'similarity': reverse('similarity'),
         },
+        # Only staff users see the "Edit metadata" control — everyone else
+        # gets the existing read-only metadata view.
+        'canEditMetadata': can_edit_metadata,
+        # How long analysis outputs are kept before automatic deletion
+        # (see the cleanup_old_outputs management command) — surfaced so
+        # the "your results are kept for N days" notice always matches
+        # the real configured value instead of a hardcoded guess.
+        'outputRetentionDays': getattr(settings, 'OUTPUT_RETENTION_DAYS', 14),
     }
 
 
@@ -81,17 +93,17 @@ def landing_page(request):
 
 def suitability(request):
     return render(request, 'targeting_app/pages/suitability_page.html',
-                  {'js_config': _js_config()})
+                  {'js_config': _js_config(request)})
 
 
 def similarity(request):
     return render(request, 'targeting_app/pages/similarity_page.html',
-                  {'js_config': _js_config()})
+                  {'js_config': _js_config(request)})
 
 
 def statistics(request):
     return render(request, 'targeting_app/pages/statistics_page.html',
-                  {'js_config': _js_config()})
+                  {'js_config': _js_config(request)})
 
 
 def resources(request):
@@ -109,6 +121,19 @@ def get_reference_layers(request):
 
     if not os.path.exists(base_dir):
         return JsonResponse({'error': 'Path not found'}, status=404)
+
+    # Be robust to being handed a raster FILE path instead of its
+    # containing folder — e.g. a session created before the
+    # raster_base_path fix in land_suitability.py/land_similarity.py
+    # (which used to include the filename for Global datasets) may still
+    # have that stale value cached. Fall back to the parent directory
+    # instead of crashing with NotADirectoryError.
+    if os.path.isfile(base_dir):
+        base_dir = os.path.dirname(base_dir)
+        raster_path = os.path.dirname(raster_path)
+
+    if not os.path.isdir(base_dir):
+        return JsonResponse({'error': 'Path is not a directory'}, status=404)
 
     files = [
         {'file_path': os.path.join(raster_path, f), 'name': f}
@@ -160,6 +185,22 @@ _TRANSPARENT_PNG = bytes((
     0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 0, 1, 0, 0, 5,
     0, 1, 13, 10, 45, 180, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66,
     96, 130,
+))
+
+# Translucent-orange 1x1 PNG (Leaflet stretches it to fill the 256x256 tile
+# slot via CSS, same trick as the transparent one above). Used ONLY when
+# settings.DEBUG is on, to make a genuine tile-render *crash* visually
+# distinguishable, right on the map, from a tile that's legitimately
+# outside the raster's footprint or genuinely has no data there (which
+# still render as _TRANSPARENT_PNG). Without this, both cases look
+# identical in the browser and the only trace of a real bug is a server
+# log line nobody watching the map can see.
+_ERROR_TILE_PNG = bytes((
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+    0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137,
+    0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 31, 192, 176,
+    0, 0, 5, 145, 1, 240, 71, 123, 118, 69, 0, 0, 0, 0, 73, 69,
+    78, 68, 174, 66, 96, 130,
 ))
 
 
@@ -349,13 +390,49 @@ def tile_raster(request, z: int, x: int, y: int):
 
     vmin, vmax = info['range']
     nodata = info['nodata']
+    # NaN is a fragile sentinel to hand to GDAL/rio-tiler as `nodata=`:
+    # comparisons like `value == nan` are always False, so whether NaN
+    # pixels actually get masked can depend on which internal read path a
+    # given zoom level takes (a coarse decimated/overview read vs. a
+    # near-native-resolution windowed read can behave differently). That's
+    # exactly the symptom of large blocks of real data going missing only
+    # at some zoom levels: the raster's own NaN fill wasn't being masked
+    # consistently. Real (non-NaN) declared nodata values don't have this
+    # problem and are still passed straight through.
+    nodata_is_nan = isinstance(nodata, float) and math.isnan(nodata)
 
     try:
         tile_kwargs = {'tilesize': 256}
-        if nodata is not None:
+        if nodata is not None and not nodata_is_nan:
             tile_kwargs['nodata'] = nodata
         with _RioReader(full_path) as src:
             img = src.tile(x, y, z, **tile_kwargs)
+        if nodata_is_nan:
+            # Mask NaN pixels ourselves post-read with an isnan check,
+            # which is safe/consistent regardless of which GDAL read path
+            # produced the tile — unlike relying on GDAL's own nodata
+            # handling for a NaN sentinel.
+            import numpy as _np
+            img.array = _np.ma.masked_invalid(img.array)
+        if settings.DEBUG and request.GET.get('debug') == '1':
+            # A tile can also render "successfully" yet be entirely
+            # masked — a legitimate "no valid data here" rather than a
+            # bug, but until now indistinguishable from one just by
+            # looking at the map. Report it explicitly instead of
+            # falling through to the same blank PNG silently.
+            import numpy as _np
+            arr = img.array
+            mask = _np.ma.getmaskarray(arr) if _np.ma.is_masked(arr) else None
+            masked_fraction = float(mask.mean()) if mask is not None else 0.0
+            if masked_fraction >= 0.999:
+                return JsonResponse({
+                    'info': 'Tile rendered successfully but is (almost) '
+                            'entirely masked — genuinely no valid data in '
+                            'this tile, not a crash.',
+                    'masked_fraction': masked_fraction,
+                    'nodata': nodata, 'nodata_is_nan': nodata_is_nan,
+                    'path': full_path, 'z': z, 'x': x, 'y': y,
+                })
         # ``invert=1`` flips the colour ramp. Reversing ``in_range`` as
         # ``((vmax, vmin),)`` does NOT work: rio-tiler's rescale calls
         # ``np.clip(image, imin, imax)`` internally, and numpy's clip with
@@ -377,11 +454,31 @@ def tile_raster(request, z: int, x: int, y: int):
             colormap = _rio_cmap.get(default_cmap if default_cmap != cmap_name else 'viridis')
         content = img.render(img_format='PNG', colormap=colormap)
     except _TileOutsideBounds:
+        if settings.DEBUG and request.GET.get('debug') == '1':
+            return JsonResponse({
+                'error': 'TileOutsideBounds — this tile has no geographic '
+                         'overlap with the raster, per rio-tiler\'s own '
+                         'bounds check (independent of the /api/rasterMeta '
+                         'bounds shown to the map).',
+                'path': full_path, 'z': z, 'x': x, 'y': y,
+            }, status=404)
         content = _TRANSPARENT_PNG
-    except Exception:
+    except Exception as exc:
         logger.exception('Tile render failed for %s z=%s x=%s y=%s',
                          full_path, z, x, y)
-        content = _TRANSPARENT_PNG
+        # Append &debug=1 to any tile URL to see the actual Python error
+        # as JSON right in the browser — no server console access needed.
+        if settings.DEBUG and request.GET.get('debug') == '1':
+            return JsonResponse({
+                'error': str(exc), 'type': type(exc).__name__,
+                'path': full_path, 'z': z, 'x': x, 'y': y,
+            }, status=500)
+        # Otherwise, in DEBUG, make a genuine crash visually distinct from
+        # "this tile legitimately has no data" (both used to render as the
+        # same blank transparent tile, making the two indistinguishable
+        # from the map alone). In production, stay transparent — an
+        # orange tile grid isn't something end users should see.
+        content = _ERROR_TILE_PNG if settings.DEBUG else _TRANSPARENT_PNG
 
     response = HttpResponse(content, content_type='image/png')
     response['Cache-Control'] = 'public, max-age=86400'
@@ -407,9 +504,96 @@ def raster_meta(request):
             status=501,
         )
     try:
+        import rasterio as _rasterio
+
+        # rio_tiler's `geographic_bounds` reprojects the dataset's native
+        # bounds to WGS84 via a generic bounds-transform helper — for a
+        # raster whose native CRS is ALREADY geographic (plain lon/lat)
+        # and spans the full 360° of longitude, that reprojection is a
+        # no-op that's needlessly fragile: transforming a boundary that
+        # meets itself at the antimeridian can collapse west and east to
+        # nearly the same value (a hairline sliver instead of the true
+        # global extent), which is exactly what made most tile requests
+        # fall outside `bounds` and never even get requested. When the
+        # source is already geographic, use its raw bounds directly and
+        # skip that reprojection entirely.
+        with _rasterio.open(full_path) as ds:
+            native_crs = ds.crs
+            native_bounds = ds.bounds
+
         with _RioReader(full_path) as src:
-            b = src.geographic_bounds  # (west, south, east, north) in WGS84
             minz, maxz = int(src.minzoom), int(src.maxzoom)
+            # Treat an UNDEFINED CRS the same as geographic, not as "go
+            # through the reprojection helper" — a raster with no CRS tag
+            # at all (common for informally-prepared global rasters) isn't
+            # geographic per this check (`native_crs` is falsy), so it was
+            # silently falling through to the same fragile antimeridian
+            # reprojection this whole fix exists to avoid. Reprojection is
+            # only actually meaningful for a raster with a real, defined,
+            # NON-geographic (projected) CRS.
+            if native_crs is None or native_crs.is_geographic:
+                b = (float(native_bounds.left), float(native_bounds.bottom),
+                     float(native_bounds.right), float(native_bounds.top))
+                bounds_source = 'raw_dataset_bounds'
+            else:
+                # Bypass rio_tiler's `geographic_bounds` here too — it
+                # reprojects by densifying the boundary (sampling extra
+                # points along each edge before transforming), and for a
+                # raster reaching Web Mercator's full-world edge, that
+                # edge-sampling can produce numerically inconsistent
+                # longitude extremes right at the boundary, collapsing
+                # west and east together (the exact hairline-sliver bug
+                # this whole fix targets — it just turned out to also
+                # affect the "needs real reprojection" case, not only the
+                # "already geographic" one).
+                #
+                # rasterio.warp.transform_bounds refuses densify_pts=0
+                # when the output CRS is geographic ("densify_pts must be
+                # at least 2"), so it can't just be turned off. Instead,
+                # transform the 4 corner points directly with
+                # rasterio.warp.transform (no densify concept at all —
+                # it's a plain point transform) and take min/max
+                # ourselves. Exact for an axis-aligned rectangle under a
+                # well-behaved projection like Web Mercator, and
+                # completely sidesteps transform_bounds's internal
+                # edge-sampling.
+                from rasterio.warp import transform as _transform_points
+                corner_xs = [native_bounds.left, native_bounds.right,
+                             native_bounds.right, native_bounds.left]
+                corner_ys = [native_bounds.bottom, native_bounds.bottom,
+                             native_bounds.top, native_bounds.top]
+                lon, lat = _transform_points(native_crs, 'EPSG:4326', corner_xs, corner_ys)
+                south, north = min(lat), max(lat)
+
+                # Web Mercator's full-world edge is exactly ±20037508.34m
+                # (that's what maps to ±180°). A raster whose native width
+                # already reaches — or, as seen here, very slightly
+                # exceeds — that full circumference is global in
+                # longitude by construction. Its right edge landing a few
+                # hundred meters PAST +180° is not a defect: transforming
+                # that point back to longitude correctly wraps around to
+                # just past -180° (180.01° and -179.99° are the same
+                # meridian), which lands almost exactly on top of the
+                # left edge — reporting a collapsed sliver instead of the
+                # true global span. Detect that case and report the
+                # honest -180/180 directly rather than trusting a
+                # per-corner transform that's fundamentally ambiguous
+                # right at the wrap point.
+                _WEB_MERCATOR_FULL_WIDTH = 2 * 20037508.342789244
+                native_width = native_bounds.right - native_bounds.left
+                is_web_mercator = False
+                try:
+                    is_web_mercator = native_crs.to_epsg() == 3857
+                except Exception:
+                    pass
+                if is_web_mercator and native_width >= _WEB_MERCATOR_FULL_WIDTH * 0.999:
+                    west, east = -180.0, 180.0
+                    bounds_source = 'web_mercator_full_width_forced_180'
+                else:
+                    west, east = min(lon), max(lon)
+                    bounds_source = 'transform_bounds_corners_only'
+
+                b = (west, south, east, north)
         # Reuse the (cached) display range so the frontend legend matches the
         # colours the tiles are actually rescaled to. Also pre-warms the cache.
         info = _get_raster_info(full_path)
@@ -423,6 +607,13 @@ def raster_meta(request):
             'data_range': data_range,
             'hist_bins':  info.get('hist_bins')  if info else None,
             'hist_edges': info.get('hist_edges') if info else None,
+            # Diagnostic — lets you confirm directly (no server access
+            # needed) whether this raster has a defined CRS, and which
+            # bounds path was used to compute `bounds` above.
+            'native_crs': str(native_crs) if native_crs else None,
+            'native_bounds': [float(native_bounds.left), float(native_bounds.bottom),
+                              float(native_bounds.right), float(native_bounds.top)],
+            'bounds_source': bounds_source,
         })
     except Exception as exc:
         logger.exception('raster_meta failed for %s', full_path)
@@ -1034,18 +1225,19 @@ def _build_suitability_pdf(out_buf, title, raster_path, criteria, aoi_str):
     # Criteria table
     if criteria:
         story.append(Paragraph('Criteria', S['h2']))
-        rows = [['Layer', 'Min', 'Opt from', 'Opt to', 'Max', 'Combine']]
+        rows = [['Layer', 'Group', 'Min', 'Opt from', 'Opt to', 'Max', 'Combine']]
         for c in criteria:
             rows.append([
                 Paragraph(_xml_escape_for_pdf(c.get('name', '')), S['body']),
+                Paragraph(_xml_escape_for_pdf(c.get('group', '') or '—'), S['body']),
                 _fmt_num_for_pdf(c.get('min_val')),
                 _fmt_num_for_pdf(c.get('opti_from')),
                 _fmt_num_for_pdf(c.get('opti_to')),
                 _fmt_num_for_pdf(c.get('max_val')),
                 c.get('combine') or '—',
             ])
-        t = Table(rows, colWidths=[5.6 * cm, 2.1 * cm, 2.1 * cm,
-                                   2.1 * cm, 2.1 * cm, 2.1 * cm])
+        t = Table(rows, colWidths=[4.6 * cm, 2.6 * cm, 1.7 * cm,
+                                   1.9 * cm, 1.9 * cm, 1.7 * cm, 1.9 * cm])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), C['green_tint']),
             ('TEXTCOLOR',  (0, 0), (-1, 0), C['ink']),
@@ -1844,6 +2036,72 @@ def layer_metadata(request):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
+# Curated metadata fields an authorized user may set on a dataset. Kept to
+# a fixed allow-list so a curated field can never shadow/confuse one of the
+# GDAL-derived technical fields layer_metadata() returns alongside it.
+_EDITABLE_METADATA_FIELDS = {
+    'title', 'description', 'source', 'units', 'category',
+    'date_created', 'contact', 'license', 'notes',
+}
+
+
+@require_POST
+@csrf_protect
+@user_passes_test(lambda u: u.is_staff)
+def update_layer_metadata(request):
+    """Create/update the curated metadata sidecar for a dataset under data/.
+
+    Lets authorized (staff) users correct or enrich a dataset's
+    title/source/units/etc. by writing a ``<raster>.meta.json`` sidecar
+    next to the .tif — the same sidecar ``layer_metadata()`` already reads
+    and merges in under ``curated``. This avoids having to delete and
+    re-upload a dataset just to fix a metadata typo.
+    """
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({'status': 'error', 'message': 'Invalid JSON body.'}, status=400)
+
+    full_path = _resolve_raster_path(body.get('path', ''))
+    if full_path is None:
+        return JsonResponse({'status': 'error', 'message': 'Dataset not found.'}, status=404)
+
+    metadata = body.get('metadata')
+    if not isinstance(metadata, dict):
+        return JsonResponse(
+            {'status': 'error', 'message': '"metadata" must be an object.'}, status=400)
+
+    unknown = set(metadata.keys()) - _EDITABLE_METADATA_FIELDS
+    if unknown:
+        return JsonResponse({
+            'status': 'error',
+            'message': (
+                f"Unknown metadata field(s): {', '.join(sorted(unknown))}. "
+                f"Allowed: {', '.join(sorted(_EDITABLE_METADATA_FIELDS))}."
+            ),
+        }, status=400)
+
+    # Coerce everything to strings and drop empty values, so clearing a
+    # field in the edit form actually removes it rather than persisting an
+    # empty string forever.
+    cleaned = {
+        k: str(v).strip() for k, v in metadata.items()
+        if v is not None and str(v).strip() != ''
+    }
+
+    sidecar_path = os.path.splitext(full_path)[0] + '.meta.json'
+    try:
+        with open(sidecar_path, 'w', encoding='utf-8') as fh:
+            json.dump(cleaned, fh, indent=2, ensure_ascii=False)
+    except OSError as e:
+        logger.exception('Failed to write metadata sidecar %s', sidecar_path)
+        return JsonResponse(
+            {'status': 'error', 'message': f'Could not save metadata: {e}'}, status=500)
+
+    logger.info('Metadata updated for %s by %s: %s', full_path, request.user, cleaned)
+    return JsonResponse({'status': 'success', 'curated': cleaned})
+
+
 def get_directory_contents(request):
     """List directories and .tif files under ``data/<path>``.
 
@@ -2053,14 +2311,31 @@ def process_land_suitability(request):
                 status=400,
             )
 
+        # rasterParameters is a list, one entry per selected row and in the
+        # same order — NOT a dict keyed by file path. A dict keyed by path
+        # would collide whenever the same dataset is used more than once
+        # (e.g. in two different combine groups), silently dropping one of
+        # the two sets of thresholds. Older clients may still send the
+        # legacy dict-keyed-by-path shape, so support both.
+        legacy_dict_shape = isinstance(raster_parameters, dict)
+
         for i, file_path in enumerate(selected_files):
-            if file_path not in raster_parameters:
-                return JsonResponse(
-                    {'status': 'error',
-                     'message': f'Missing parameters for raster {file_path}.'},
-                    status=400,
-                )
-            rp = raster_parameters[file_path]
+            if legacy_dict_shape:
+                if file_path not in raster_parameters:
+                    return JsonResponse(
+                        {'status': 'error',
+                         'message': f'Missing parameters for raster {file_path}.'},
+                        status=400,
+                    )
+                rp = raster_parameters[file_path]
+            else:
+                if i >= len(raster_parameters):
+                    return JsonResponse(
+                        {'status': 'error',
+                         'message': f'Missing parameters for raster {file_path}.'},
+                        status=400,
+                    )
+                rp = raster_parameters[i]
             idx = i + 1
             parameters[f'in_raster_{idx}'] = 'data' + file_path
             parameters[f'min_val_{idx}'] = rp['min_val']
@@ -2072,7 +2347,7 @@ def process_land_suitability(request):
         logger.debug('Land suitability parameters: %s', parameters)
 
         suitability_tool = LandSuitability(parameters, request.session)
-        result_relative_url = suitability_tool.execute()
+        result_relative_url, layer_warnings = suitability_tool.execute()
         result_absolute_url = request.build_absolute_uri(result_relative_url)
 
         # Path relative to MEDIA_ROOT, for the tile endpoint (?source=result).
@@ -2086,6 +2361,10 @@ def process_land_suitability(request):
             'status': 'success',
             'result_url': result_absolute_url,
             'result_path': result_path,
+            # Layers that were selected but produced no output (e.g. no
+            # valid data under the AOI) — surfaced so a partial result is
+            # explained rather than silently missing a layer.
+            'warnings': layer_warnings,
         })
 
     except Exception as e:
@@ -2132,8 +2411,28 @@ def process_land_similarity(request):
             'description': description,
         }
 
+        # AOI is optional; resolve it to a polygon when supplied — crops
+        # every selected raster to this region before analysis, instead
+        # of always processing full extents (critical for global
+        # datasets, which can otherwise mean reading/reprojecting the
+        # entire planet for an analysis that only needs a small area).
+        aoi = data.get('aoi')
+        if aoi:
+            try:
+                parameters['out_extent'] = _resolve_aoi_geometry(aoi)
+            except ValueError as ve:
+                return JsonResponse({'status': 'error', 'message': str(ve)}, status=400)
+            logger.debug('Similarity AOI resolved to geometry: %s', parameters['out_extent'])
+        else:
+            logger.debug('No AOI provided for similarity; proceeding without spatial extent filter.')
+
         land_similarity = LandSimilarity(parameters, request.session)
         result = land_similarity.execute()
+        if not result:
+            return JsonResponse(
+                {'status': 'error', 'message': 'Land similarity processing failed.'},
+                status=500,
+            )
 
         def _strip_media(u):
             if not u:
@@ -2154,6 +2453,10 @@ def process_land_similarity(request):
                 'mnobis': _strip_media(result.get('Mahalanobis')),
                 'mess': _strip_media(result.get('MESS')),
             },
+            # Sample points excluded because they fell outside a
+            # dataset's extent or landed on NoData — surfaced so this is
+            # visible instead of silently affecting the result.
+            'point_warnings': result.get('point_warnings', []),
         })
 
     except Exception as e:
@@ -2218,9 +2521,34 @@ def process_statistics(request):
 # ---------------------------------------------------------------------------
 
 def get_user_files(request):
-    """Return the list of files generated by the user during the session."""
+    """Return the list of files generated by the user during the session.
+
+    Entries whose underlying output file no longer exists on disk (e.g.
+    removed by the `cleanup_old_outputs` retention job, or manually) are
+    dropped here and the cleaned list is written back to the session —
+    otherwise a deleted analysis would keep showing up as a "processed
+    file" the user could pick, only to fail when they actually tried to
+    use it.
+    """
     files = request.session.get('generated_files', [])
-    return JsonResponse(files, safe=False)
+    still_present = []
+    for entry in files:
+        file_path = entry.get('file_path') if isinstance(entry, dict) else None
+        # _resolve_result_path already confirms the file exists on disk
+        # (as well as validating it's a safe path under MEDIA_ROOT).
+        if file_path and _resolve_result_path(file_path):
+            still_present.append(entry)
+
+    if len(still_present) != len(files):
+        logger.info(
+            'get_user_files: pruned %d stale entr%s (file no longer on disk) from session',
+            len(files) - len(still_present),
+            'y' if len(files) - len(still_present) == 1 else 'ies',
+        )
+        request.session['generated_files'] = still_present
+        request.session.modified = True
+
+    return JsonResponse(still_present, safe=False)
 
 
 @user_passes_test(lambda u: u.is_superuser)

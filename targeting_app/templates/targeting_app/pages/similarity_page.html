@@ -27,6 +27,10 @@
             </div>
         </aside>
 
+        <div class="resize-handle resize-handle-vertical" data-resize-handle
+             data-resize-target=".panel-layers" data-resize-axis="width"
+             data-resize-min="160" data-resize-max="640"></div>
+
         {# ---------- CENTRE: map + selected layers ---------- #}
         <div class="suit-center">
 
@@ -37,6 +41,10 @@
                     <div id="mapLayersControl" class="map-layers-control" style="display:none;"></div>
                 </div>
             </section>
+
+            <div class="resize-handle resize-handle-horizontal" data-resize-handle
+                 data-resize-target=".panel-table" data-resize-axis="height"
+                 data-resize-invert="true" data-resize-min="80" data-resize-max="700"></div>
 
             <section class="suit-panel panel-table">
                 <div class="panel-head">
@@ -50,10 +58,26 @@
 
         </div>
 
+        <div class="resize-handle resize-handle-vertical" data-resize-handle
+             data-resize-target=".panel-side" data-resize-axis="width"
+             data-resize-invert="true" data-resize-min="220" data-resize-max="640"></div>
+
         {# ---------- RIGHT: sample points + run + results ---------- #}
         <aside class="suit-panel panel-side">
             <div class="panel-head"><i class="fas fa-crosshairs"></i>Sample points &amp; analysis</div>
             <div class="panel-body">
+
+                <div class="suit-section-title">Area of interest (AOI)</div>
+                <small id="simAoiStatus" class="text-muted d-block mb-2">No AOI set — using full extent (draw a polygon/rectangle, or upload a file; recommended for global datasets).</small>
+                <div class="d-flex align-items-center mb-2">
+                    <label for="simAoiFileUpload" class="btn btn-outline-secondary btn-sm mb-0 mr-2" style="cursor:pointer;">Upload AOI</label>
+                    <input type="file" id="simAoiFileUpload" accept=".geojson,.json,.kml,.kmz,.zip" style="display:none;">
+                    <button type="button" id="clearSimAoiBtn" class="btn btn-outline-secondary btn-sm mb-0">Clear AOI</button>
+                </div>
+                <small id="simAoiFileError" class="text-danger d-block mb-2"></small>
+                <input type="hidden" id="simAoiInput" name="aoi" value="">
+
+                <hr>
 
                 <div class="suit-section-title">Sample points</div>
                 <div class="form-check">
@@ -62,16 +86,18 @@
                 </div>
                 <div class="form-check">
                     <input class="form-check-input" type="radio" name="aoiOption" id="aoiOptionFile" value="file">
-                    <label class="form-check-label" for="aoiOptionFile">Upload file (GeoJSON / CSV)</label>
+                    <label class="form-check-label" for="aoiOptionFile">Upload file (GeoJSON / CSV / KML / KMZ / Shapefile)</label>
                 </div>
 
                 <div id="fileUploadSection" class="points-upload mt-2" style="display: none;">
-                    <label for="aoiFileUpload">Points file (GeoJSON, or CSV with Latitude, Longitude)</label>
-                    <input type="file" id="aoiFileUpload" name="aoiFileUpload" accept=".geojson, .csv" class="form-control-file">
+                    <label for="aoiFileUpload">Points file (GeoJSON, CSV, KML/KMZ, or a zipped point Shapefile)</label>
+                    <input type="file" id="aoiFileUpload" name="aoiFileUpload"
+                           accept=".geojson,.json,.csv,.kml,.kmz,.zip" class="form-control-file">
                     <div id="fileError" class="error mt-2"></div>
+                    <div id="fileSuccess" class="text-success mt-2" style="font-size:11px;"></div>
                 </div>
 
-                <p class="suit-help">In map mode, use the marker tool (top-left of the map) to drop reference points.</p>
+                <p class="suit-help">In map mode, use the marker tool (top-left of the map) to drop reference points. Use the polygon/rectangle tool for the AOI above.</p>
 
                 <hr>
 
@@ -89,7 +115,16 @@
                     <button type="submit" class="btn btn-success btn-block" id="submitBtn">
                         <i class="fas fa-play"></i> Run Analysis
                     </button>
+                    <button type="button" class="btn btn-outline-secondary btn-block" id="resetAnalysisBtn">
+                        <i class="fas fa-undo"></i> Reset points, AOI &amp; results
+                    </button>
                 </form>
+
+                <div id="staleResultNotice" class="alert alert-warning mt-2" style="display:none;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Points have changed &mdash; the results below are from a previous
+                    selection. Run the analysis again to refresh them.
+                </div>
 
                 <div id="resultSection" class="mt-3" style="display: none;">
                     <h6 class="suit-section-title">Processing complete</h6>
@@ -99,6 +134,7 @@
                     <a id="downloadMnobisLink" href="#" class="btn btn-success btn-sm btn-block" download>
                         <i class="fas fa-download"></i> Download Mahalanobis
                     </a>
+                    <small data-retention-notice class="text-muted d-block mt-2"></small>
                 </div>
 
             </div>
@@ -117,6 +153,11 @@
     <script src="{% static 'targeting_app/js/georaster.browser.bundle.min.js' %}"></script>
     <script src="{% static 'targeting_app/js/georaster-layer-for-leaflet.min.js' %}"></script>
     <script src="{% static 'targeting_app/js/rainbowvis.js' %}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
+    <script src="https://unpkg.com/@tmcw/togeojson@5.8.0/dist/togeojson.umd.js"></script>
     <script src="{% static 'targeting_app/js/directory_browser.js' %}"></script>
+    <script src="{% static 'targeting_app/js/panel_resize.js' %}"></script>
+    <script src="{% static 'targeting_app/js/retention_notice.js' %}"></script>
     <script src="{% static 'targeting_app/js/similarity_page.js' %}"></script>
 {% endblock %}

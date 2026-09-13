@@ -76,6 +76,12 @@ class LandStatistics:
         Returns: (class_data_masked, ref_aligned_masked)
         """
         class_data = class_src.read(1, masked=True)
+        # Safety net for an undeclared NaN fill (no nodata tag on the
+        # file, but real NaN pixels) — same gap as the reprojection path
+        # below already guards against via dst_nodata=np.nan +
+        # masked_invalid. Without this, class_data's own NaN pixels (if
+        # any) would flow into the class/reference stats uncounted.
+        class_data = np.ma.masked_invalid(class_data)
 
         # If already same grid, no work
         same_grid = (
@@ -86,6 +92,10 @@ class LandStatistics:
         )
         if same_grid:
             ref_data = ref_src.read(1, masked=True)
+            # Same undeclared-NaN safety net as above — this fast path
+            # skips reproject() entirely (and its dst_nodata=np.nan +
+            # masked_invalid handling below), so it needs its own.
+            ref_data = np.ma.masked_invalid(ref_data)
             return class_data, ref_data
 
         resampling = self._pick_resampling_for_reference(ref_src)

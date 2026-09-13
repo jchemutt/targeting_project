@@ -17,11 +17,11 @@
     flex: 1;
     min-height: 0;
     display: flex;
-    gap: 10px;
+    gap: 0;
     padding: 10px;
 }
 
-.panel-layers { flex: none; width: 232px; }
+.panel-layers { flex: none; width: 232px; min-width: 160px; max-width: 50vw; }
 
 .suit-center {
     flex: 1;
@@ -29,12 +29,65 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 0;
 }
 
-.panel-map   { flex: 1 1 auto; min-height: 0; }
-.panel-table { flex: 0 0 auto; height: 230px; }
-.panel-side  { flex: none; width: 320px; }
+.panel-map   { flex: 1 1 auto; min-height: 80px; }
+.panel-table { flex: 0 0 auto; height: 230px; min-height: 80px; max-height: 70vh; }
+.panel-side  { flex: none; width: 320px; min-width: 220px; max-width: 50vw; }
+
+/* --- Drag handles for resizable panels (see panel_resize.js) ---
+   Thin strips sitting between panels; dragging adjusts the panel's inline
+   width/height (JS-set), letting people reflow the workspace for their
+   screen instead of being stuck with fixed panel sizes. Hidden on the
+   stacked mobile layout below, where side-by-side resizing doesn't apply. */
+.resize-handle {
+    flex: none;
+    position: relative;
+    z-index: 5;
+}
+.resize-handle-vertical {
+    width: 10px;
+    margin: 0 -3px;
+    cursor: col-resize;
+}
+.resize-handle-horizontal {
+    height: 10px;
+    margin: -3px 0;
+    cursor: row-resize;
+}
+.resize-handle::after {
+    content: "";
+    position: absolute;
+    background: var(--tt-border);
+    border-radius: 2px;
+    transition: background 0.15s;
+}
+.resize-handle-vertical::after {
+    top: 8px;
+    bottom: 8px;
+    left: 4px;
+    width: 2px;
+}
+.resize-handle-horizontal::after {
+    left: 8px;
+    right: 8px;
+    top: 4px;
+    height: 2px;
+}
+.resize-handle:hover::after,
+.resize-handle.is-dragging::after {
+    background: var(--tt-green, #2e7d32);
+}
+.resize-handle.is-dragging {
+    z-index: 6;
+}
+body.is-resizing-panels {
+    cursor: inherit;
+    user-select: none;
+}
+body.is-resizing-panels.is-resizing-vertical { cursor: col-resize; }
+body.is-resizing-panels.is-resizing-horizontal { cursor: row-resize; }
 
 /* --- Panel shell --- */
 .suit-panel {
@@ -253,6 +306,19 @@
     border-radius: 4px;
     padding: 1px 6px;
     white-space: nowrap;
+    cursor: text;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.criteria-group-badge:hover {
+    border-color: var(--tt-green-dark);
+}
+.criteria-group-badge:focus {
+    outline: none;
+    border-color: var(--tt-green-dark);
+    box-shadow: 0 0 0 2px var(--tt-green-tint);
+    white-space: normal;
 }
 
 .criteria-card-name {
@@ -439,6 +505,18 @@
 
     .suit-panel {
         margin-bottom: 10px;
+    }
+
+    /* Side-by-side resizing doesn't apply once panels stack vertically. */
+    .resize-handle {
+        display: none;
+    }
+    .panel-layers,
+    .panel-side {
+        width: 100% !important;
+    }
+    .panel-table {
+        height: auto !important;
     }
 
     .panel-map .map-shell {

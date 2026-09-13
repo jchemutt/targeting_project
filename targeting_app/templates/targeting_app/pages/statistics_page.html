@@ -24,6 +24,7 @@
         <aside class="suit-panel panel-layers">
             <div class="panel-head"><i class="fas fa-folder-open"></i>Processed files</div>
             <div class="panel-body">
+                <small data-retention-notice class="text-muted d-block mb-2"></small>
                 <input type="text" id="filesSearchInput" class="form-control form-control-sm mb-2"
                        placeholder="Search by description…" autocomplete="off">
                 <div class="table-responsive">
@@ -43,6 +44,10 @@
             </div>
         </aside>
 
+        <div class="resize-handle resize-handle-vertical" data-resize-handle
+             data-resize-target=".panel-layers" data-resize-axis="width"
+             data-resize-min="160" data-resize-max="640"></div>
+
         {# ---------- CENTRE: map + results ---------- #}
         <div class="suit-center">
 
@@ -53,6 +58,10 @@
                     <div id="mapLayersControl" class="map-layers-control" style="display:none;"></div>
                 </div>
             </section>
+
+            <div class="resize-handle resize-handle-horizontal" data-resize-handle
+                 data-resize-target=".panel-table" data-resize-axis="height"
+                 data-resize-invert="true" data-resize-min="80" data-resize-max="700"></div>
 
             <section class="suit-panel panel-table">
                 <div class="panel-head">
@@ -69,6 +78,7 @@
                             </button>
                         </div>
                         <div id="resultsTable"></div>
+                        <small data-retention-notice class="text-muted d-block mt-2"></small>
                     </div>
                     <p id="resultsEmptyHint" class="suit-help">
                         Pick a processed file, choose a reference layer and statistics on the right, then click <strong>Process statistics</strong>.
@@ -77,6 +87,10 @@
             </section>
 
         </div>
+
+        <div class="resize-handle resize-handle-vertical" data-resize-handle
+             data-resize-target=".panel-side" data-resize-axis="width"
+             data-resize-invert="true" data-resize-min="220" data-resize-max="640"></div>
 
         {# ---------- RIGHT: parameters & run ---------- #}
         <aside class="suit-panel panel-side">
@@ -163,5 +177,7 @@
 
 {% block extra_js %}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{% static 'targeting_app/js/panel_resize.js' %}"></script>
+    <script src="{% static 'targeting_app/js/retention_notice.js' %}"></script>
     <script src="{% static 'targeting_app/js/statistics_page.js' %}"></script>
 {% endblock %}

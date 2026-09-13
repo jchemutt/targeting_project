@@ -15,12 +15,24 @@ import shutil
 #from osgeo import gdal
 from django.utils.timezone import now
 from pathlib import Path
+from shapely.geometry import shape, Polygon, MultiPolygon, box, mapping
 
 from .similarity_analysis import similarity_analysis
 
 # Ensure GDAL_DATA is set correctly
 #os.environ['GDAL_DATA'] = os.environ['CONDA_PREFIX'] + r'\Library\share\gdal'
 #print(f"GDAL_DATA is set to: {os.environ.get('GDAL_DATA')}")
+
+
+def _is_global_dataset_path(raster_url):
+    """True if raster_url sits directly under a "Global" folder (any case),
+    e.g. "data/Global/x.tif" — as opposed to a country-specific path like
+    "data/Africa/Kenya/x.tif". Checks directory segments only, not the
+    filename, so a file literally named "global_x.tif" doesn't false-match.
+    Mirrors the identical helper in land_suitability.py.
+    """
+    return any(part.lower() == "global" for part in Path(raster_url).parts[:-1])
+
 
 class LandSimilarity:
     def __init__(self, parameters,session):
@@ -69,53 +81,141 @@ class LandSimilarity:
         return points_gdf
 
 
-    def sample_rasters(self, rasters, points_path, output_path):
+    def get_extent_from_aoi(self, aoi_input):
         """
-        Sample raster values at point locations and save as a shapefile.
+        Convert AOI input (GeoJSON dict/string, or a comma-separated
+        bounding box string) into a shapely Polygon/MultiPolygon in
+        EPSG:4326. Mirrors LandSuitability.get_extent_from_aoi for
+        consistency between the two tools.
+        """
+        if isinstance(aoi_input, dict):
+            if "type" in aoi_input:
+                if aoi_input["type"] == "Feature":
+                    geometry = aoi_input.get("geometry", None)
+                    if not geometry:
+                        raise ValueError("GeoJSON Feature does not contain geometry.")
+                    return shape(geometry)
+                elif aoi_input["type"] in {"Polygon", "MultiPolygon"}:
+                    return shape(aoi_input)
+                else:
+                    raise ValueError(f"Unsupported GeoJSON type: {aoi_input['type']}")
+            else:
+                raise ValueError("Invalid GeoJSON format: Missing 'type'.")
+        elif isinstance(aoi_input, str):
+            coords = [float(x) for x in aoi_input.split(",")]
+            if len(coords) == 4:
+                return box(coords[1], coords[0], coords[3], coords[2])
+            raise ValueError("Invalid AOI bounding box string.")
+        raise TypeError("Unsupported AOI input type.")
+
+    def sample_rasters(self, rasters, points_gdf, output_csv_path):
+        """
+        Sample raster values at point locations and write them as a CSV
+        with one column per raster (column name = raster file stem,
+        matching `band_names` in similarity_analysis.stack_rasters_to_template
+        so the threshold statistics align correctly with the per-pixel
+        raster stack).
+
+        A point is excluded (left as NaN) from a given raster's column if
+        it falls outside that raster's actual extent, or lands on a
+        NoData pixel — determined by an EXPLICIT bounds/NoData check
+        rather than relying on IndexError. rasterio's `.index()` does NOT
+        bounds-check: it just applies the affine transform, so an
+        out-of-bounds point can still produce a row/col that is a "valid"
+        (if wrong) numpy index via negative-index wraparound — e.g. a
+        point south of a raster's extent could compute row=-2, and
+        `array[-2, col]` silently returns a pixel from the OPPOSITE edge
+        of the raster rather than raising. That meant points outside a
+        dataset's actual coverage could previously be silently sampled
+        from the wrong location instead of being excluded, corrupting the
+        similarity statistics without any indication anything was wrong.
+
+        Parameters:
+            rasters (list[str]): raster file paths.
+            points_gdf (GeoDataFrame): sample points (already reprojected
+                to the rasters' CRS).
+            output_csv_path (str): where to write the resulting CSV.
+
+        Returns:
+            list[str]: human-readable warnings, one per raster that had
+            any point excluded or could not be sampled at all.
         """
         print(f"Sampling rasters from: {rasters}")
-        print(f"Using points from: {points_path}")
-        print(f"Output path: {output_path}")
+        print(f"Sampling {len(points_gdf)} point(s)")
+        print(f"Output path: {output_csv_path}")
 
-        sampled_data = []
-        points_gdf = gpd.read_file(points_path)
-        print(f"Loaded points GeoDataFrame: {points_gdf.head()}")
+        n_points = len(points_gdf)
+        columns = {}
+        warnings = []
 
-        # Initialize sampled points list
-        sampled_points = []
-
-        # Sample raster values at the points
         for raster_path in rasters:
+            col_name = Path(raster_path).stem
+            values = np.full(n_points, np.nan, dtype="float64")
+            excluded_out_of_bounds = 0
+            excluded_nodata = 0
             try:
                 with rasterio.open(raster_path) as src:
                     print(f"Processing raster: {raster_path}")
-                    for point in points_gdf.geometry:
-                        try:
-                            row, col = src.index(point.x, point.y)
-                            sample_value = src.read(1)[row, col]
-                            sampled_data.append(sample_value)
-                            sampled_points.append(point)  # geometry for this sample
-                        except IndexError:
-                            print(f"Point {point} is outside raster bounds.")
-                            sampled_data.append(np.nan)
-                            sampled_points.append(point)  # <-- add this line
+                    band = src.read(1)
+                    height, width = band.shape
+                    nodata = src.nodata
+                    band_is_float = np.issubdtype(band.dtype, np.floating)
+                    for i, point in enumerate(points_gdf.geometry):
+                        row, col = src.index(point.x, point.y)
+                        if not (0 <= row < height and 0 <= col < width):
+                            print(f"Point {point} is outside raster bounds: {raster_path}")
+                            excluded_out_of_bounds += 1
+                            continue
+                        sample_value = band[row, col]
+                        # An undeclared NaN fill (no `nodata` tag on the
+                        # file, but real NaN pixels — common for climate
+                        # layers) must be excluded here too, or that NaN
+                        # sample value flows straight into the threshold
+                        # CSV and contaminates the Mahalanobis/MESS mean
+                        # and covariance for every point, not just this
+                        # one.
+                        is_nan = band_is_float and np.isnan(sample_value)
+                        if is_nan or (nodata is not None and sample_value == nodata):
+                            excluded_nodata += 1
+                            continue
+                        values[i] = sample_value
             except Exception as e:
                 print(f"Error processing raster {raster_path}: {e}")
+                warnings.append(f"{os.path.basename(raster_path)}: could not be sampled ({e}).")
 
+            columns[col_name] = values
 
-        # Save sampled data to shapefile if samples exist
-        if sampled_data:
-            print("Writing sampled data to shapefile...")
-            sample_df = pd.DataFrame({'values': sampled_data})
-            sample_gdf = gpd.GeoDataFrame(sample_df, geometry=sampled_points, crs=points_gdf.crs)
-            sample_gdf.to_file(output_path, driver='ESRI Shapefile')
-            print(f"Sampled shapefile written to: {output_path}")
+            total_excluded = excluded_out_of_bounds + excluded_nodata
+            if total_excluded:
+                parts = []
+                if excluded_out_of_bounds:
+                    parts.append(f"{excluded_out_of_bounds} outside its extent")
+                if excluded_nodata:
+                    parts.append(f"{excluded_nodata} on NoData pixels")
+                warnings.append(
+                    f"{os.path.basename(raster_path)}: {total_excluded} of "
+                    f"{n_points} point(s) excluded ({', '.join(parts)})."
+                )
+
+        sample_df = pd.DataFrame(columns)
+        if sample_df.notna().to_numpy().any():
+            print("Writing sampled data to CSV...")
+            sample_df.to_csv(output_csv_path, index=False)
+            print(f"Sampled CSV written to: {output_csv_path}")
         else:
-            print("No sampled data available. Skipping shapefile creation.")
+            print("No sampled data available. Skipping CSV creation.")
+
+        return warnings
 
     def write_csv_from_dbf(self, dbf_path, csv_path):
         """
         Convert a DBF file to a CSV format.
+
+        Not used by the main execute() pipeline anymore — sample_rasters()
+        now writes temp.csv directly (DBF field names are capped at 10
+        characters, which risked truncating/colliding with raster file
+        names once sampling switched to one column per raster). Left here
+        in case anything else needs a DBF-to-CSV utility.
         """
 
         try:
@@ -153,12 +253,25 @@ class LandSimilarity:
             # === Extract base path from the first raster ===
             raster_base_path = None
             if rasters:
-                first_raster_path = rasters[0]
-                path_parts = Path(first_raster_path).parts
-                if len(path_parts) >= 3:
-                    raster_base_path = str(Path(*path_parts[:3]))  # Top 3 directory levels
-                else:
-                    raster_base_path = str(Path(first_raster_path).parent)  # Fallback
+                # When a Global dataset is combined with a country-specific
+                # one, prefer the country's folder — whichever raster
+                # happened to be added first in the UI isn't a meaningful
+                # signal, and a country's own reference layers are the
+                # more useful/specific set for Land Statistics to offer
+                # than falling back to Global just because a global layer
+                # was selected first.
+                first_raster_path = next(
+                    (u for u in rasters if not _is_global_dataset_path(u)),
+                    rasters[0],
+                )
+                # See the identical fix/comment in land_suitability.py's
+                # execute(): "first 3 path parts" broke for Global
+                # datasets ("data/Global/x.tif" is only 3 parts total, so
+                # that heuristic swallowed the filename as if it were a
+                # directory) — get_reference_layers would then try to
+                # os.listdir() a .tif file and crash. The raster's own
+                # parent directory is correct at any nesting depth.
+                raster_base_path = str(Path(first_raster_path).parent)
 
                 print(f"Raster base path extracted: {raster_base_path}")
             else:
@@ -168,28 +281,23 @@ class LandSimilarity:
             print(f"Raster CRS: {raster_crs}")
             gdf = self.reproject_points(gdf, raster_crs)
 
-            in_fc_pt = os.path.join(self.ras_temp_path, "input_points.shp")
-            print(f"Saving reprojected points to: {in_fc_pt}")
-            gdf.to_file(in_fc_pt)
-
             print("Sampling rasters...")
-            sample_shapefile_path = os.path.join(self.ras_temp_path, "temp_sample.shp")
-            self.sample_rasters(rasters, in_fc_pt, sample_shapefile_path)
-            print(f"Sampled data saved to: {sample_shapefile_path}")
-
-            # Define paths for DBF and CSV
-            sample_dbf_path = os.path.join(self.ras_temp_path, "temp_sample.dbf")
             sample_csv_path = os.path.join(self.ras_temp_path, "temp.csv")
-
-            # Write the DBF file to a CSV
-            self.write_csv_from_dbf(sample_dbf_path, sample_csv_path)
+            point_warnings = self.sample_rasters(rasters, gdf, sample_csv_path)
+            print(f"Sampled data saved to: {sample_csv_path}")
 
             temp_csv_path = os.path.join(self.ras_temp_path, "temp.csv")
             if not os.path.exists(temp_csv_path):
                 raise FileNotFoundError(f"temp.csv not found: {temp_csv_path}")
 
             print("Calling similarity_analysis...")
-            similarity_analysis(len(rasters), self.ras_temp_path, rasters)
+            aoi_input = self.parameters.get('out_extent')
+            aoi_geojson = None
+            if aoi_input:
+                aoi_geom = self.get_extent_from_aoi(aoi_input)
+                aoi_geojson = mapping(aoi_geom)
+            similarity_analysis(len(rasters), self.ras_temp_path, rasters,
+                                aoi_geojson=aoi_geojson)
 
             mnobis_file = os.path.join(self.ras_temp_path, 'MahalanobisDist_Quantiles.tif')
             mess_file = os.path.join(self.ras_temp_path, 'MESS_Quantiles.tif')
@@ -228,7 +336,13 @@ class LandSimilarity:
             self.cleanup_intermediate_files(keep_files=[mnobis_file, mess_file])
             return {
                 "Mahalanobis": result_relative_mnobis_ras_url,
-                "MESS": result_relative_mess_ras_url
+                "MESS": result_relative_mess_ras_url,
+                # Sample points that fell outside a dataset's coverage
+                # (extent or NoData) and were excluded, per raster — so a
+                # result is transparent about which points didn't
+                # contribute rather than silently dropping or (worse,
+                # previously) mis-sampling them.
+                "point_warnings": point_warnings,
             }
         except Exception as e:
             print(f"Error during execution: {e}")

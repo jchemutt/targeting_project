@@ -262,10 +262,10 @@ $(document).ready(function () {
       ),
     };
     baseLayers.Street.addTo(map);
-    L.control.layers(baseLayers, null, { position: "bottomleft", collapsed: true }).addTo(map);
+    L.control.layers(baseLayers, null, { position: "bottomright", collapsed: true }).addTo(map);
 
     // Scale bar (metric).
-    L.control.scale({ position: "bottomleft", imperial: false }).addTo(map);
+    L.control.scale({ position: "bottomright", imperial: false }).addTo(map);
 
     map.addLayer(drawnItems);
 
@@ -358,6 +358,41 @@ $(document).ready(function () {
       const f = document.getElementById("aoiFileUpload");
       if (f) f.value = "";
     });
+  }
+
+  // ----- Full reset: datasets, AOI, and any previous result -----
+  // A one-click way to start a brand-new analysis without refreshing the
+  // page — clears every selected criteria card (unticking its source
+  // file and dropping its map preview), the AOI, and any previously
+  // shown result (map overlay, download link, report/chain-workflow
+  // links, layer warnings).
+  function resetAllDatasetsAoiAndResults() {
+    document.querySelectorAll('.criteria-card[data-raster-id]').forEach((card) => {
+      removeSelectedFile(card.dataset.rasterId);
+    });
+
+    clearAOI(drawnItems, aoiInput, aoiStatusEl);
+    const aoiFile = document.getElementById("aoiFileUpload");
+    if (aoiFile) aoiFile.value = "";
+
+    const descriptionInput = document.getElementById("description");
+    if (descriptionInput) descriptionInput.value = "";
+
+    if (currentResultKey) {
+      MapLayers.removeLayer(currentResultKey);
+      currentResultKey = null;
+    }
+    $('#resultSection').hide();
+    const chainLinks = document.getElementById('resultChainLinks');
+    const reportLinks = document.getElementById('resultReportLinks');
+    if (chainLinks) chainLinks.innerHTML = '';
+    if (reportLinks) reportLinks.innerHTML = '';
+    renderLayerWarnings([]);
+  }
+
+  const resetAllBtn = document.getElementById("resetAllBtn");
+  if (resetAllBtn) {
+    resetAllBtn.addEventListener("click", resetAllDatasetsAoiAndResults);
   }
 
   // Download the current AOI as a .geojson file the user can save / share.
@@ -750,6 +785,32 @@ $(document).ready(function () {
   }
 
   /* =========================
+     Layer warnings (datasets the backend had to skip)
+  ========================= */
+  function renderLayerWarnings(warnings) {
+    let container = document.getElementById('layerWarnings');
+    const resultSection = document.getElementById('resultSection');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'layerWarnings';
+      container.className = 'alert alert-warning mt-2';
+      if (resultSection) resultSection.insertBefore(container, resultSection.firstChild);
+    }
+    if (!warnings || !warnings.length) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+    container.style.display = 'block';
+    container.innerHTML =
+      '<strong><i class="fas fa-exclamation-triangle"></i> ' +
+      (warnings.length === 1 ? '1 layer was skipped:' : `${warnings.length} layers were skipped:`) +
+      '</strong><ul class="mb-0 pl-3">' +
+      warnings.map((w) => `<li>${escHtml(w)}</li>`).join('') +
+      '</ul>';
+  }
+
+  /* =========================
      Chain-workflow link (open the result in Land Statistics)
   ========================= */
   function renderChainLink(resultPath) {
@@ -793,16 +854,21 @@ $(document).ready(function () {
   function exportReport(resultPath, description, rasterParameters, aoiStr) {
     if (!API.reportSuitability) return;
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
-    // Flatten rasterParameters (keyed by file path) into a list ordered by
-    // the current card order so the table matches the on-screen grouping.
+    // rasterParameters is an ordered array -- one entry per row, in the
+    // same order as the criteria cards (see validateForm) -- NOT an object
+    // keyed by file path, precisely so a dataset used twice (in two
+    // different groups) gets two independent entries instead of one
+    // overwriting the other. Match cards to params by position, not path.
     const criteria = [];
-    document.querySelectorAll('#rasterCards .criteria-card').forEach((card) => {
-      const fp = card.getAttribute('data-original-filepath');
-      const params = rasterParameters && rasterParameters[fp];
+    document.querySelectorAll('#rasterCards .criteria-card').forEach((card, i) => {
+      const params = rasterParameters && rasterParameters[i];
       if (!params) return;
+      const fp = card.getAttribute('data-original-filepath');
       // Derive a short display name from the file path's last segment.
       const name = (fp || '').split(/[\\/]/).pop();
-      criteria.push({ name, ...params });
+      const badge = card.querySelector('.criteria-group-badge');
+      const group = badge ? badge.textContent.trim() : '';
+      criteria.push({ name, group, ...params });
     });
 
     const btn = document.getElementById('exportReportBtn');
@@ -900,16 +966,127 @@ $(document).ready(function () {
     return html;
   }
 
+  // Fixed set of curated fields an authorized user can set — mirrors the
+  // allow-list the backend enforces in update_layer_metadata().
+  const EDITABLE_METADATA_FIELDS = [
+    { key: 'title', label: 'Title' },
+    { key: 'description', label: 'Description' },
+    { key: 'source', label: 'Source' },
+    { key: 'units', label: 'Units' },
+    { key: 'category', label: 'Category' },
+    { key: 'date_created', label: 'Date created' },
+    { key: 'contact', label: 'Contact' },
+    { key: 'license', label: 'License' },
+    { key: 'notes', label: 'Notes' },
+  ];
+  let currentMetaLayer = null; // { path, name, source, meta }
+
+  // Existing values to start the edit form from — curated (already
+  // user-set) takes priority, falling back to whatever was already known
+  // from auto-derived/parsed sources, so editing starts from "what's
+  // already there" instead of a blank form even before anyone has saved
+  // curated metadata for this dataset yet.
+  function prefillMetadataValues(meta) {
+    const curated = (meta && meta.curated) || {};
+    const descriptive = (meta && meta.descriptive) || {};
+    const pick = (...candidates) => {
+      for (const c of candidates) {
+        if (c !== undefined && c !== null && String(c).trim() !== '') return String(c);
+      }
+      return '';
+    };
+    return {
+      title: pick(curated.title, descriptive.Title),
+      description: pick(curated.description, descriptive.Abstract, meta && meta.band_description),
+      source: pick(curated.source, descriptive.Credit),
+      units: pick(curated.units, meta && meta.units, descriptive['Units (declared)']),
+      category: pick(curated.category),
+      date_created: pick(curated.date_created),
+      contact: pick(curated.contact),
+      license: pick(curated.license),
+      notes: pick(curated.notes, descriptive.Keywords),
+    };
+  }
+
+  function renderMetaEditForm(meta) {
+    const values = prefillMetadataValues(meta);
+    const rows = EDITABLE_METADATA_FIELDS.map(({ key, label }) => {
+      const val = escHtml(values[key] || '');
+      const isLong = key === 'description' || key === 'notes';
+      return `
+        <div class="form-group row mb-2">
+          <label class="col-4 col-form-label col-form-label-sm">${escHtml(label)}</label>
+          <div class="col-8">
+            ${isLong
+              ? `<textarea class="form-control form-control-sm" data-meta-field="${key}" rows="2">${val}</textarea>`
+              : `<input type="text" class="form-control form-control-sm" data-meta-field="${key}" value="${val}">`}
+          </div>
+        </div>`;
+    }).join('');
+    return `
+      <form id="metaEditForm">
+        ${rows}
+        <div id="metaEditError" class="text-danger small mb-2"></div>
+        <div class="d-flex justify-content-end">
+          <button type="button" id="metaEditCancelBtn" class="btn btn-sm btn-outline-secondary mr-2">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-success">Save metadata</button>
+        </div>
+      </form>`;
+  }
+
+  function wireMetaEditForm(bodyEl, path) {
+    const form = bodyEl.querySelector('#metaEditForm');
+    const errorEl = bodyEl.querySelector('#metaEditError');
+    bodyEl.querySelector('#metaEditCancelBtn').addEventListener('click', () => {
+      bodyEl.innerHTML = renderMetaTable(currentMetaLayer.meta);
+    });
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      errorEl.textContent = '';
+      const metadata = {};
+      form.querySelectorAll('[data-meta-field]').forEach((el) => {
+        metadata[el.dataset.metaField] = el.value;
+      });
+      const submitBtn = form.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving…';
+      try {
+        const resp = await fetch(API.updateLayerMetadata, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value,
+          },
+          body: JSON.stringify({ path, metadata }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.status !== 'success') {
+          throw new Error(data.message || `HTTP ${resp.status}`);
+        }
+        currentMetaLayer.meta.curated = data.curated;
+        bodyEl.innerHTML = renderMetaTable(currentMetaLayer.meta);
+      } catch (err) {
+        errorEl.textContent = err.message || String(err);
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save metadata';
+      }
+    });
+  }
+
   async function showLayerMetadata(path, name, source) {
     const titleEl = document.getElementById("layerMetaTitle");
     const bodyEl = document.getElementById("layerMetaBody");
     const dlEl = document.getElementById("layerMetaDownload");
+    const editBtn = document.getElementById("layerMetaEditBtn");
     if (!bodyEl || !API.layerMetadata) return;
     if (titleEl) titleEl.textContent = name || "Layer metadata";
     const src = source === "result" ? "&source=result" : "";
     if (dlEl) {
       dlEl.href = `${API.layerMetadata}?path=${encodeURIComponent(path)}${src}&download=1`;
     }
+    // Curated metadata only applies to source datasets, not analysis
+    // results — a result has no dataset sidecar to edit.
+    if (editBtn) editBtn.style.display = (CONFIG.canEditMetadata && source !== "result") ? "inline-block" : "none";
     bodyEl.innerHTML = '<div class="text-muted">Loading metadata…</div>';
     try { $("#layerMetaModal").modal("show"); } catch (_) {}
     try {
@@ -917,7 +1094,14 @@ $(document).ready(function () {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const m = await resp.json();
       if (m.error) throw new Error(m.error);
+      currentMetaLayer = { path, name, source, meta: m };
       bodyEl.innerHTML = renderMetaTable(m);
+      if (editBtn) {
+        editBtn.onclick = () => {
+          bodyEl.innerHTML = renderMetaEditForm(currentMetaLayer.meta);
+          wireMetaEditForm(bodyEl, path);
+        };
+      }
     } catch (err) {
       bodyEl.innerHTML = `<div class="text-danger">Could not load metadata: ${escHtml(err.message || String(err))}</div>`;
     }
@@ -1143,7 +1327,49 @@ $(document).ready(function () {
   let rasterCounter = 0;
   let groupRows = {};
 
+  // Dataset paths look like "/Africa/Kenya/kenya_x.tif" (continent/country)
+  // or "/Global/global_x.tif" (no country level). Returns null for a
+  // global dataset (unrestricted — combines with anything) or the
+  // country segment for a country-specific one.
+  function getCountryFromPath(filePath) {
+    const parts = (filePath || "").split(/[\\/]/).filter(Boolean);
+    if (!parts.length) return null;
+    if (parts[0].toLowerCase() === "global") return null;
+    return parts.length > 1 ? parts[1] : null;
+  }
+
+  // Combining datasets from two different countries silently produces no
+  // output (their extents never overlap), which used to surface as a
+  // late, confusing crash. Catch it at selection time instead: block
+  // adding a second country's dataset while one is already selected, but
+  // always allow Global datasets alongside a country one.
+  function findConflictingCountrySelection(newFilePath) {
+    const newCountry = getCountryFromPath(newFilePath);
+    if (!newCountry) return null; // selecting a Global dataset — never conflicts
+    let conflict = null;
+    document.querySelectorAll('.criteria-card[data-original-filepath]').forEach((card) => {
+      if (conflict) return;
+      const existingCountry = getCountryFromPath(card.getAttribute('data-original-filepath'));
+      if (existingCountry && existingCountry !== newCountry) conflict = existingCountry;
+    });
+    return conflict;
+  }
+
   async function addSelectedFile(filePath, fileName, minVal, maxVal) {
+    const conflictingCountry = findConflictingCountrySelection(filePath);
+    if (conflictingCountry) {
+      alert(
+        `This dataset is from ${getCountryFromPath(filePath)}, but you already have a ` +
+        `${conflictingCountry} dataset selected. Combining datasets from two different ` +
+        `countries produces no valid output (their areas never overlap). Remove the ` +
+        `${conflictingCountry} dataset first, or choose another ${conflictingCountry} or ` +
+        `Global dataset instead.`
+      );
+      const checkbox = document.querySelector(`input[type="checkbox"][value="${filePath}"]`);
+      if (checkbox) checkbox.checked = false;
+      return;
+    }
+
     rasterCounter++;
     const rasterId = rasterCounter;
     const sanitized = DirectoryBrowser.sanitizeFilePath(filePath);
@@ -1183,9 +1409,11 @@ $(document).ready(function () {
     card.setAttribute("data-original-filepath", filePath);
     card.innerHTML = `
       <div class="criteria-card-head">
-        <span class="criteria-group-badge"></span>
+        <span class="criteria-group-badge" contenteditable="true" spellcheck="false"
+              title="Click to rename this group"></span>
         <span class="criteria-card-name" title="${safeName}">${safeName}</span>
         <span class="criteria-card-actions">
+          <button type="button" class="btn btn-link btn-sm duplicate-btn" title="Use this dataset again in another group"><i class="fas fa-clone"></i></button>
           <button type="button" class="btn btn-link btn-sm move-up-btn" title="Move up"><i class="fas fa-arrow-up"></i></button>
           <button type="button" class="btn btn-link btn-sm move-down-btn" title="Move down"><i class="fas fa-arrow-down"></i></button>
           <button type="button" class="btn btn-link btn-sm remove-btn text-danger" title="Remove"><i class="fas fa-trash"></i></button>
@@ -1207,14 +1435,14 @@ $(document).ready(function () {
              title="Maximum — values above this point score 0 (unsuitable). Drag to set the upper cut-off."></div>
       </div>
       <div class="trap-fields">
-        <label>Min<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][min_val]" value="${aMin}"></label>
-        <label>Opt. from<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][opti_from]" value="${optFrom}"></label>
-        <label>Opt. to<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][opti_to]" value="${optTo}"></label>
-        <label>Max<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}][max_val]" value="${aMax}"></label>
+        <label>Min<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}_${rasterId}][min_val]" value="${aMin}"></label>
+        <label>Opt. from<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}_${rasterId}][opti_from]" value="${optFrom}"></label>
+        <label>Opt. to<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}_${rasterId}][opti_to]" value="${optTo}"></label>
+        <label>Max<input type="text" inputmode="decimal" class="form-control form-control-sm" name="rasterParameters[${sanitized}_${rasterId}][max_val]" value="${aMax}"></label>
       </div>
       <div class="trap-combine">
         <label><input type="checkbox" class="combine-check"> Combine with previous group</label>
-        <select id="combine_${sanitized}" name="rasterParameters[${sanitized}][combine]" class="combine-select" hidden>
+        <select id="combine_${sanitized}_${rasterId}" name="rasterParameters[${sanitized}_${rasterId}][combine]" class="combine-select" hidden>
           <option value="Yes">Yes</option>
           <option value="No" selected>No</option>
         </select>
@@ -1223,6 +1451,8 @@ $(document).ready(function () {
     cards.appendChild(card);
 
     card.querySelector(".remove-btn").addEventListener("click", () => removeSelectedFile(rasterId));
+    card.querySelector(".duplicate-btn").addEventListener("click", () =>
+      addSelectedFile(filePath, fileName, aMin, aMax));
     card.querySelector(".move-up-btn").addEventListener("click", () => moveCard(card, "up"));
     card.querySelector(".move-down-btn").addEventListener("click", () => moveCard(card, "down"));
 
@@ -1262,11 +1492,16 @@ $(document).ready(function () {
     const originalFilePath = card.getAttribute("data-original-filepath");
     card.remove();
 
-    const checkbox = document.querySelector(`input[type="checkbox"][value="${originalFilePath}"]`);
-    if (checkbox) checkbox.checked = false;
-
-    // Remove the corresponding preview from the map.
-    MapLayers.removeLayer(originalFilePath);
+    // Same dataset may still be in use by another (duplicated) card — only
+    // untick the tree checkbox and drop the map preview once no card
+    // references this file path anymore.
+    const stillUsed = document.querySelector(
+      `.criteria-card[data-original-filepath="${originalFilePath}"]`);
+    if (!stillUsed) {
+      const checkbox = document.querySelector(`input[type="checkbox"][value="${originalFilePath}"]`);
+      if (checkbox) checkbox.checked = false;
+      MapLayers.removeLayer(originalFilePath);
+    }
 
     updateCombineOptions();
   }
@@ -1311,16 +1546,59 @@ $(document).ready(function () {
       const groupNumber = parseInt(card.getAttribute("data-group"), 10);
       groupRows[groupNumber] = groupRows[groupNumber] || [];
       groupRows[groupNumber].push(card);
+    });
 
-      const badge = card.querySelector(".criteria-group-badge");
-      if (badge) badge.textContent = "Group " + groupNumber;
+    // Apply a custom name (if the user renamed this group) to every card
+    // in the group, so all its badges agree. A rename is stored on
+    // whichever card is the group's first/"leader" card at save time
+    // (see the badge edit handler below), so it naturally travels with
+    // the group across reordering, and reverts to the default "Group N"
+    // if that specific leader card is later removed.
+    Object.keys(groupRows).forEach((groupNumber) => {
+      const rowCards = groupRows[groupNumber];
+      const namedCard = rowCards.find((c) => c.dataset.groupName);
+      const label = namedCard ? namedCard.dataset.groupName : `Group ${groupNumber}`;
+      rowCards.forEach((c) => {
+        const badge = c.querySelector(".criteria-group-badge");
+        if (badge && document.activeElement !== badge) badge.textContent = label;
+      });
+    });
+  }
+
+  // ----- Rename a combine group by editing its badge in place -----
+  const rasterCardsEl = document.getElementById("rasterCards");
+  if (rasterCardsEl) {
+    const commitGroupRename = (badge) => {
+      const card = badge.closest(".criteria-card");
+      if (!card) return;
+      const groupNumber = card.getAttribute("data-group");
+      const rowCards = (groupRows[groupNumber] || [card]);
+      const defaultLabel = `Group ${groupNumber}`;
+      const trimmed = (badge.textContent || "").trim();
+      rowCards.forEach((c) => { delete c.dataset.groupName; });
+      if (trimmed && trimmed !== defaultLabel) rowCards[0].dataset.groupName = trimmed;
+      updateCombineOptions();
+    };
+    rasterCardsEl.addEventListener("focusout", (e) => {
+      const badge = e.target.closest(".criteria-group-badge");
+      if (badge) commitGroupRename(badge);
+    });
+    rasterCardsEl.addEventListener("keydown", (e) => {
+      const badge = e.target.closest(".criteria-group-badge");
+      if (!badge) return;
+      if (e.key === "Enter") { e.preventDefault(); badge.blur(); }
+      else if (e.key === "Escape") { e.preventDefault(); updateCombineOptions(); badge.blur(); }
     });
   }
 
   function removeSelectedFileByFilePath(filePath) {
-    const card = document.querySelector(`.criteria-card[data-original-filepath="${filePath}"]`);
-    if (card) {
-      card.remove();
+    // Unchecking the source file in the tree drops the dataset entirely —
+    // remove every card using it, including any duplicates added via the
+    // "use again" button.
+    const cards = document.querySelectorAll(
+      `.criteria-card[data-original-filepath="${filePath}"]`);
+    if (cards.length) {
+      cards.forEach((card) => card.remove());
       updateCombineOptions();
     }
     // Remove the corresponding preview from the map (covers the
@@ -1353,19 +1631,21 @@ $(document).ready(function () {
   console.info("No AOI provided — processing full raster extent.");
    }
 
-    // Build rasterParameters payload (same as your approach)
-    const rasterParameters = {};
+    // Build rasterParameters payload — one entry per row, in the same
+    // order as selectedFiles. Kept as an array (not keyed by file path) so
+    // the same dataset can be used more than once with independent
+    // thresholds/groups without one entry overwriting the other.
+    const rasterParameters = [];
     let isValid = true;
 
     selectedRows.forEach((row) => {
       const originalFilePath = row.getAttribute("data-original-filepath");
-      const key = DirectoryBrowser.sanitizeFilePath(originalFilePath);
 
-      const minValInput = row.querySelector(`input[name="rasterParameters[${key}][min_val]"]`);
-      const maxValInput = row.querySelector(`input[name="rasterParameters[${key}][max_val]"]`);
-      const optiFromInput = row.querySelector(`input[name="rasterParameters[${key}][opti_from]"]`);
-      const optiToInput = row.querySelector(`input[name="rasterParameters[${key}][opti_to]"]`);
-      const combineInput = row.querySelector(`select[name="rasterParameters[${key}][combine]"]`);
+      const minValInput = row.querySelector(`input[name*="[min_val]"]`);
+      const maxValInput = row.querySelector(`input[name*="[max_val]"]`);
+      const optiFromInput = row.querySelector(`input[name*="[opti_from]"]`);
+      const optiToInput = row.querySelector(`input[name*="[opti_to]"]`);
+      const combineInput = row.querySelector(`select[name*="[combine]"]`);
 
       const minVal = minValInput?.value;
       const maxVal = maxValInput?.value;
@@ -1393,13 +1673,14 @@ $(document).ready(function () {
         return;
         }
 
-      rasterParameters[originalFilePath] = {
+      rasterParameters.push({
+        file_path: originalFilePath,
         opti_from: optiFrom,
         opti_to: optiTo,
         min_val: minVal,
         max_val: maxVal,
         combine: combineInput.value,
-      };
+      });
     });
 
     if (!isValid) return false;
@@ -1444,6 +1725,12 @@ $(document).ready(function () {
                                    formData.rasterParameters,
                                    formData.aoi);
               }
+
+              // Layers the backend selected but couldn't actually use (e.g.
+              // no valid data under the AOI) — surface this instead of
+              // silently returning a result that's missing a layer the
+              // user thought was included.
+              renderLayerWarnings(data.warnings || []);
 
               $('html, body').animate({
                 scrollTop: $('#resultSection').offset().top

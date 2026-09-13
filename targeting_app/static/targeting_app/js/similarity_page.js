@@ -21,12 +21,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const pointsInput         = document.getElementById('pointsInput');
   const uploadedPointsInput = document.getElementById('uploadedPointsInput');
   const fileError           = document.getElementById('fileError');
+  const fileSuccess         = document.getElementById('fileSuccess');
   const fileListElement     = document.getElementById('fileList');
   const selectedFilesForm   = document.getElementById('selectedFilesForm');
   const selectedFilesContainer = document.getElementById('selectedFilesContainer');
 
+  // Real spatial AOI (distinct from the "aoiOption*"/"aoiFileUpload"
+  // elements above, which — despite the name — are about sample POINTS,
+  // not an area of interest).
+  const simAoiInput  = document.getElementById('simAoiInput');
+  const simAoiStatus = document.getElementById('simAoiStatus');
+  const clearSimAoiBtn = document.getElementById('clearSimAoiBtn');
+  const simAoiFileUpload = document.getElementById('simAoiFileUpload');
+  const simAoiFileError  = document.getElementById('simAoiFileError');
+
   let map = null;
   let drawnItems = new L.FeatureGroup();
+  let uploadedPointsPreview = new L.FeatureGroup();
+  let aoiDrawnItems = new L.FeatureGroup();
   let firstAddDone = false;
   let currentResultKeys = [];
 
@@ -130,14 +142,125 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return html;
   }
+  // Fixed set of curated fields an authorized user can set — mirrors the
+  // allow-list the backend enforces in update_layer_metadata().
+  const EDITABLE_METADATA_FIELDS = [
+    { key: 'title', label: 'Title' },
+    { key: 'description', label: 'Description' },
+    { key: 'source', label: 'Source' },
+    { key: 'units', label: 'Units' },
+    { key: 'category', label: 'Category' },
+    { key: 'date_created', label: 'Date created' },
+    { key: 'contact', label: 'Contact' },
+    { key: 'license', label: 'License' },
+    { key: 'notes', label: 'Notes' },
+  ];
+  let currentMetaLayer = null; // { path, name, source, meta }
+
+  // Existing values to start the edit form from — curated (already
+  // user-set) takes priority, falling back to whatever was already known
+  // from auto-derived/parsed sources, so editing starts from "what's
+  // already there" instead of a blank form even before anyone has saved
+  // curated metadata for this dataset yet.
+  function prefillMetadataValues(meta) {
+    const curated = (meta && meta.curated) || {};
+    const descriptive = (meta && meta.descriptive) || {};
+    const pick = (...candidates) => {
+      for (const c of candidates) {
+        if (c !== undefined && c !== null && String(c).trim() !== '') return String(c);
+      }
+      return '';
+    };
+    return {
+      title: pick(curated.title, descriptive.Title),
+      description: pick(curated.description, descriptive.Abstract, meta && meta.band_description),
+      source: pick(curated.source, descriptive.Credit),
+      units: pick(curated.units, meta && meta.units, descriptive['Units (declared)']),
+      category: pick(curated.category),
+      date_created: pick(curated.date_created),
+      contact: pick(curated.contact),
+      license: pick(curated.license),
+      notes: pick(curated.notes, descriptive.Keywords),
+    };
+  }
+
+  function renderMetaEditForm(meta) {
+    const values = prefillMetadataValues(meta);
+    const rows = EDITABLE_METADATA_FIELDS.map(({ key, label }) => {
+      const val = escHtml(values[key] || '');
+      const isLong = key === 'description' || key === 'notes';
+      return `
+        <div class="form-group row mb-2">
+          <label class="col-4 col-form-label col-form-label-sm">${escHtml(label)}</label>
+          <div class="col-8">
+            ${isLong
+              ? `<textarea class="form-control form-control-sm" data-meta-field="${key}" rows="2">${val}</textarea>`
+              : `<input type="text" class="form-control form-control-sm" data-meta-field="${key}" value="${val}">`}
+          </div>
+        </div>`;
+    }).join('');
+    return `
+      <form id="metaEditForm">
+        ${rows}
+        <div id="metaEditError" class="text-danger small mb-2"></div>
+        <div class="d-flex justify-content-end">
+          <button type="button" id="metaEditCancelBtn" class="btn btn-sm btn-outline-secondary mr-2">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-success">Save metadata</button>
+        </div>
+      </form>`;
+  }
+
+  function wireMetaEditForm(bodyEl, path) {
+    const form = bodyEl.querySelector('#metaEditForm');
+    const errorEl = bodyEl.querySelector('#metaEditError');
+    bodyEl.querySelector('#metaEditCancelBtn').addEventListener('click', () => {
+      bodyEl.innerHTML = renderMetaTable(currentMetaLayer.meta);
+    });
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      errorEl.textContent = '';
+      const metadata = {};
+      form.querySelectorAll('[data-meta-field]').forEach((el) => {
+        metadata[el.dataset.metaField] = el.value;
+      });
+      const submitBtn = form.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving…';
+      try {
+        const resp = await fetch(API.updateLayerMetadata, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value,
+          },
+          body: JSON.stringify({ path, metadata }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.status !== 'success') {
+          throw new Error(data.message || `HTTP ${resp.status}`);
+        }
+        currentMetaLayer.meta.curated = data.curated;
+        bodyEl.innerHTML = renderMetaTable(currentMetaLayer.meta);
+      } catch (err) {
+        errorEl.textContent = err.message || String(err);
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save metadata';
+      }
+    });
+  }
+
   async function showLayerMetadata(path, name, source) {
     const titleEl = document.getElementById("layerMetaTitle");
     const bodyEl  = document.getElementById("layerMetaBody");
     const dlEl    = document.getElementById("layerMetaDownload");
+    const editBtn = document.getElementById("layerMetaEditBtn");
     if (!bodyEl || !API.layerMetadata) return;
     if (titleEl) titleEl.textContent = name || "Layer metadata";
     const src = source === "result" ? "&source=result" : "";
     if (dlEl) dlEl.href = `${API.layerMetadata}?path=${encodeURIComponent(path)}${src}&download=1`;
+    // Curated metadata only applies to source datasets, not analysis
+    // results — a result has no dataset sidecar to edit.
+    if (editBtn) editBtn.style.display = (CONFIG.canEditMetadata && source !== "result") ? "inline-block" : "none";
     bodyEl.innerHTML = '<div class="text-muted">Loading metadata…</div>';
     try { $("#layerMetaModal").modal("show"); } catch (_) {}
     try {
@@ -145,7 +268,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const m = await resp.json();
       if (m.error) throw new Error(m.error);
+      currentMetaLayer = { path, name, source, meta: m };
       bodyEl.innerHTML = renderMetaTable(m);
+      if (editBtn) {
+        editBtn.onclick = () => {
+          bodyEl.innerHTML = renderMetaEditForm(currentMetaLayer.meta);
+          wireMetaEditForm(bodyEl, path);
+        };
+      }
     } catch (err) {
       bodyEl.innerHTML = `<div class="text-danger">Could not load metadata: ${escHtml(err.message || String(err))}</div>`;
     }
@@ -382,26 +512,42 @@ document.addEventListener('DOMContentLoaded', () => {
       ),
     };
     baseLayers.Street.addTo(map);
-    L.control.layers(baseLayers, null, { position: "bottomleft", collapsed: true }).addTo(map);
-    L.control.scale({ position: "bottomleft", imperial: false }).addTo(map);
+    L.control.layers(baseLayers, null, { position: "bottomright", collapsed: true }).addTo(map);
+    L.control.scale({ position: "bottomright", imperial: false }).addTo(map);
 
     map.addLayer(drawnItems);
+    map.addLayer(uploadedPointsPreview);
+
+    map.addLayer(aoiDrawnItems);
 
     const drawControl = new L.Control.Draw({
       position: 'topleft',
       draw: {
         marker: true,
-        polygon: false, polyline: false, circle: false, rectangle: false, circlemarker: false,
+        polygon: true, rectangle: true,
+        polyline: false, circle: false, circlemarker: false,
       },
       edit: { featureGroup: drawnItems, remove: true },
     });
     map.addControl(drawControl);
 
+    if (clearSimAoiBtn) clearSimAoiBtn.addEventListener('click', clearSimAoi);
+
     map.on(L.Draw.Event.CREATED, (event) => {
-      drawnItems.addLayer(event.layer);
-      updatePointsInput();
+      if (event.layerType === 'marker') {
+        drawnItems.addLayer(event.layer);
+        updatePointsInput();
+      } else {
+        // polygon or rectangle -> AOI. Only one AOI shape at a time —
+        // drawing a new one replaces whatever was there before.
+        setSimAoiFromLayer(event.layer);
+      }
     });
     map.on(L.Draw.Event.DELETED, updatePointsInput);
+    // Dragging/moving an existing marker also changes the point set —
+    // without this, an edited point's old coordinates would silently stay
+    // in pointsInput and be re-submitted on the next run.
+    map.on(L.Draw.Event.EDITED, updatePointsInput);
 
     // Click any pixel to inspect raster values. Suppress while a draw /
     // edit / delete handler is active so we don't fight with marker drops.
@@ -419,6 +565,177 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ----- Reset / stale-result handling -----
+  // Whenever the current point selection changes (added, deleted, edited,
+  // re-uploaded, or the AOI mode is switched), any previously displayed
+  // analysis output no longer reflects the current selection. Clear it
+  // immediately rather than leaving stale results/overlays on screen for
+  // the user to mistake as belonging to the new points.
+  const resultSection      = document.getElementById('resultSection');
+  const staleResultNotice  = document.getElementById('staleResultNotice');
+
+  function clearResults({ notify } = {}) {
+    currentResultKeys.forEach((k) => MapLayers.removeLayer(k));
+    currentResultKeys = [];
+    if (resultSection) resultSection.style.display = 'none';
+    const chainLinks  = document.getElementById('resultChainLinks');
+    const reportLinks = document.getElementById('resultReportLinks');
+    if (chainLinks)  chainLinks.innerHTML = '';
+    if (reportLinks) reportLinks.innerHTML = '';
+    renderPointWarnings([]);
+    $('#downloadMessLink').attr('href', '#');
+    $('#downloadMnobisLink').attr('href', '#');
+    if (staleResultNotice) {
+      staleResultNotice.style.display = (notify && resultSectionWasShown) ? 'block' : 'none';
+    }
+  }
+
+  // Tracks whether a result has ever been shown in this session, so we
+  // only surface the "results are stale" notice when there was something
+  // to invalidate (not on the very first, empty load).
+  let resultSectionWasShown = false;
+
+  function markPointsChanged() {
+    const hadResults = resultSectionWasShown && currentResultKeys.length > 0;
+    clearResults({ notify: hadResults });
+  }
+
+  // ----- Real spatial AOI (draw a polygon/rectangle, or upload a file) -----
+  function applySimAoiFeatureCollection(fc) {
+    aoiDrawnItems.clearLayers();
+    const layer = L.geoJSON(fc, { style: { weight: 2 } });
+    layer.eachLayer((l) => aoiDrawnItems.addLayer(l));
+    simAoiInput.value = JSON.stringify(fc);
+    if (simAoiStatus) {
+      simAoiStatus.textContent = 'AOI set — the analysis will be restricted to this region.';
+      simAoiStatus.classList.remove('text-muted');
+      simAoiStatus.classList.add('text-success');
+    }
+    markPointsChanged(); // a changed AOI invalidates any previous result, same as edited points
+    return layer;
+  }
+
+  function setSimAoiFromLayer(layer) {
+    const feature = layer.toGeoJSON();
+    applySimAoiFeatureCollection({ type: 'FeatureCollection', features: [feature] });
+  }
+
+  // Normalizes a raw parsed GeoJSON value (Feature, FeatureCollection, or
+  // bare geometry) into a FeatureCollection shape.
+  function toSimFeatureCollection(geojson) {
+    if (!geojson) throw new Error('Empty GeoJSON');
+    if (typeof geojson === 'string') geojson = JSON.parse(geojson);
+    if (geojson.type === 'FeatureCollection') return geojson;
+    if (geojson.type === 'Feature') return { type: 'FeatureCollection', features: [geojson] };
+    if (geojson.type && geojson.coordinates) {
+      return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: geojson }] };
+    }
+    throw new Error('Unsupported GeoJSON structure.');
+  }
+
+  // Keeps only Polygon/MultiPolygon features — an uploaded AOI file with
+  // points or lines mixed in (or containing none at all) should be
+  // rejected clearly rather than silently producing an empty/wrong AOI.
+  function validateSimAoiFeatureCollection(fc) {
+    if (!fc || fc.type !== 'FeatureCollection' || !Array.isArray(fc.features) || fc.features.length === 0) {
+      throw new Error('AOI file must contain at least one feature.');
+    }
+    const polygons = fc.features.filter((f) => {
+      const g = f && f.geometry;
+      return g && (g.type === 'Polygon' || g.type === 'MultiPolygon');
+    });
+    if (polygons.length === 0) {
+      throw new Error('AOI file must contain a Polygon or MultiPolygon (not just points/lines).');
+    }
+    return { type: 'FeatureCollection', features: polygons };
+  }
+
+  function setSimAoiFromUpload(fc) {
+    const layer = applySimAoiFeatureCollection(fc);
+    if (map) {
+      const bounds = layer.getBounds();
+      if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.1));
+    }
+  }
+
+  function clearSimAoi() {
+    aoiDrawnItems.clearLayers();
+    simAoiInput.value = '';
+    if (simAoiFileUpload) simAoiFileUpload.value = '';
+    if (simAoiFileError) simAoiFileError.textContent = '';
+    if (simAoiStatus) {
+      simAoiStatus.textContent = 'No AOI set — using full extent.';
+      simAoiStatus.classList.remove('text-success');
+      simAoiStatus.classList.add('text-muted');
+    }
+  }
+
+  if (simAoiFileUpload) {
+    simAoiFileUpload.addEventListener('change', async () => {
+      const file = simAoiFileUpload.files[0];
+      if (!file) return;
+      if (simAoiFileError) simAoiFileError.textContent = '';
+
+      const name = (file.name || '').toLowerCase();
+      const ext = name.split('.').pop();
+
+      try {
+        let gj;
+        if (ext === 'geojson' || ext === 'json') {
+          gj = JSON.parse(await file.text());
+        } else if (ext === 'kml') {
+          gj = await parseKMLToGeoJSON(await file.text());
+        } else if (ext === 'kmz') {
+          gj = await parseKMZToGeoJSON(await file.arrayBuffer());
+        } else if (ext === 'zip') {
+          gj = await parseShapefileZipToGeoJSON(await file.arrayBuffer());
+        } else {
+          throw new Error('Unsupported file type. Upload GeoJSON (.geojson/.json), ' +
+                           'KML/KMZ, or a zipped Shapefile (.zip).');
+        }
+        const fc = validateSimAoiFeatureCollection(toSimFeatureCollection(gj));
+        setSimAoiFromUpload(fc);
+      } catch (err) {
+        console.error(err);
+        if (simAoiFileError) simAoiFileError.textContent = `Could not load AOI: ${err.message || err}`;
+      }
+    });
+  }
+
+  // ----- Uploaded-points map preview -----
+  // Renders uploaded GeoJSON/CSV points on the map so the user can verify
+  // their location and distribution before running the analysis, instead
+  // of submitting blind. Kept in a separate layer group from `drawnItems`
+  // so it's purely a preview: not editable/deletable via the draw
+  // toolbar, and not counted when `updatePointsInput` rebuilds the
+  // map-drawn point list.
+  function renderUploadedPointsPreview(points) {
+    uploadedPointsPreview.clearLayers();
+    if (!points || !points.length) {
+      if (fileSuccess) fileSuccess.textContent = '';
+      return;
+    }
+    const latLngs = [];
+    points.forEach(([lng, lat]) => {
+      if (!isFinite(lng) || !isFinite(lat)) return;
+      L.circleMarker([lat, lng], {
+        radius: 6,
+        color: '#2e7d32',
+        weight: 2,
+        fillColor: '#66bb6a',
+        fillOpacity: 0.85,
+      }).addTo(uploadedPointsPreview);
+      latLngs.push([lat, lng]);
+    });
+    if (fileSuccess) {
+      fileSuccess.textContent = `Loaded ${latLngs.length} point${latLngs.length === 1 ? '' : 's'} — shown on the map below.`;
+    }
+    if (latLngs.length) {
+      try { map.fitBounds(L.latLngBounds(latLngs), { maxZoom: 12, padding: [30, 30] }); }
+      catch (_) { /* single point or degenerate bounds — ignore */ }
+    }
+  }
+
   function updatePointsInput() {
     const points = [];
     drawnItems.eachLayer((layer) => {
@@ -428,6 +745,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     pointsInput.value = JSON.stringify(points);
+    markPointsChanged();
   }
 
   // ----- Radio handlers (map mode vs upload). Map stays visible in both. -----
@@ -437,6 +755,9 @@ document.addEventListener('DOMContentLoaded', () => {
       aoiFileUpload.value = '';
       uploadedPointsInput.value = "";
       fileError.textContent = '';
+      uploadedPointsPreview.clearLayers();
+      if (fileSuccess) fileSuccess.textContent = '';
+      markPointsChanged();
     }
   });
   aoiOptionFile.addEventListener('change', () => {
@@ -444,41 +765,186 @@ document.addEventListener('DOMContentLoaded', () => {
       fileUploadSection.style.display = 'block';
       drawnItems.clearLayers();
       pointsInput.value = "";
+      markPointsChanged();
     }
   });
 
-  // ----- Points file upload -----
-  aoiFileUpload.addEventListener('change', () => {
-    const file = aoiFileUpload.files[0];
-    if (!file) { fileError.textContent = 'Please select a file to upload.'; return; }
-    const reader = new FileReader();
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (ext === 'geojson')      reader.onload = (e) => processGeoJSON(e.target.result);
-    else if (ext === 'csv')     reader.onload = (e) => processCSV(e.target.result);
-    else { fileError.textContent = 'Invalid file format. Please upload a GeoJSON or CSV file.'; return; }
-    reader.readAsText(file);
-  });
+  // ----- Full reset: points + results, no page refresh needed -----
+  function resetAnalysis() {
+    drawnItems.clearLayers();
+    uploadedPointsPreview.clearLayers();
+    pointsInput.value = '';
+    uploadedPointsInput.value = '';
+    aoiFileUpload.value = '';
+    fileError.textContent = '';
+    if (fileSuccess) fileSuccess.textContent = '';
+    clearSimAoi();
+    clearResults({ notify: false });
+  }
+  const resetAnalysisBtn = document.getElementById('resetAnalysisBtn');
+  if (resetAnalysisBtn) resetAnalysisBtn.addEventListener('click', resetAnalysis);
 
-  function processGeoJSON(content) {
-    try {
-      const geoJSON = JSON.parse(content);
-      const points = [];
-      geoJSON.features.forEach((feature) => {
-        if (feature.geometry.type === 'Point' && feature.geometry.coordinates.length === 2) {
-          const [lng, lat] = feature.geometry.coordinates;
-          points.push([lng, lat]);
+  // ----- Shared point-extraction across GeoJSON / KML / Shapefile -----
+  // A single GeoJSON "shape" can come from json/geojson, from togeojson's
+  // KML conversion, or from shpjs's shapefile conversion (which can return
+  // either one FeatureCollection or an array of them, one per shapefile
+  // layer inside a zip). This walks all of that uniformly.
+  function extractPointsFromGeoJSON(geojsonOrArray) {
+    const points = [];
+    const nonPointTypes = new Set();
+
+    function visitGeometry(geometry) {
+      if (!geometry) return;
+      if (geometry.type === 'Point') {
+        const c = geometry.coordinates;
+        if (Array.isArray(c) && c.length >= 2 && isFinite(c[0]) && isFinite(c[1])) {
+          points.push([c[0], c[1]]);
         }
-      });
-      if (points.length === 0) { fileError.textContent = 'No valid points found in the GeoJSON file.'; return; }
-      uploadedPointsInput.value = JSON.stringify(points);
-      fileError.textContent = '';
-    } catch (e) {
-      fileError.textContent = 'Error processing GeoJSON file.';
-      console.error(e);
+      } else if (geometry.type === 'MultiPoint') {
+        (geometry.coordinates || []).forEach((c) => {
+          if (Array.isArray(c) && c.length >= 2 && isFinite(c[0]) && isFinite(c[1])) {
+            points.push([c[0], c[1]]);
+          }
+        });
+      } else if (geometry.type === 'GeometryCollection') {
+        (geometry.geometries || []).forEach(visitGeometry);
+      } else {
+        nonPointTypes.add(geometry.type);
+      }
     }
+
+    function visitFeatureCollection(fc) {
+      if (!fc) return;
+      if (fc.type === 'FeatureCollection') {
+        (fc.features || []).forEach((f) => visitGeometry(f && f.geometry));
+      } else if (fc.type === 'Feature') {
+        visitGeometry(fc.geometry);
+      } else if (fc.type) {
+        // A bare geometry object.
+        visitGeometry(fc);
+      }
+    }
+
+    if (Array.isArray(geojsonOrArray)) geojsonOrArray.forEach(visitFeatureCollection);
+    else visitFeatureCollection(geojsonOrArray);
+
+    return { points, nonPointTypes };
   }
 
+  // Shared "we now have a point list, finish loading it" tail — used by
+  // every format (GeoJSON/CSV/KML/KMZ/Shapefile) once points are extracted.
+  function finishPointsLoad(points) {
+    if (!points.length) {
+      fileError.textContent = 'No valid points found in this file.';
+      return;
+    }
+    uploadedPointsInput.value = JSON.stringify(points);
+    fileError.textContent = '';
+    renderUploadedPointsPreview(points);
+    markPointsChanged();
+  }
+
+  async function parseKMLToGeoJSON(kmlText) {
+    if (typeof toGeoJSON === 'undefined') {
+      throw new Error('KML support needs the toGeoJSON library, which failed to load.');
+    }
+    const xml = new DOMParser().parseFromString(kmlText, 'text/xml');
+    const parseError = xml.querySelector('parsererror');
+    if (parseError) throw new Error('Could not parse this KML file — it may be malformed.');
+    return toGeoJSON.kml(xml);
+  }
+
+  async function parseKMZToGeoJSON(arrayBuffer) {
+    if (typeof JSZip === 'undefined') {
+      throw new Error('KMZ support needs the JSZip library, which failed to load.');
+    }
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const kmlEntry = Object.values(zip.files).find(
+      (f) => !f.dir && f.name.toLowerCase().endsWith('.kml'));
+    if (!kmlEntry) throw new Error('No .kml file found inside this KMZ archive.');
+    const kmlText = await kmlEntry.async('string');
+    return parseKMLToGeoJSON(kmlText);
+  }
+
+  async function parseShapefileZipToGeoJSON(arrayBuffer) {
+    if (typeof shp === 'undefined') {
+      throw new Error('Shapefile support needs the shpjs library, which failed to load.');
+    }
+    return await shp(arrayBuffer);
+  }
+
+  // ----- Points file upload -----
+  aoiFileUpload.addEventListener('change', async () => {
+    const file = aoiFileUpload.files[0];
+    if (!file) { fileError.textContent = 'Please select a file to upload.'; return; }
+    if (fileSuccess) fileSuccess.textContent = '';
+    fileError.textContent = '';
+
+    const name = (file.name || '').toLowerCase();
+    const ext = name.split('.').pop();
+
+    try {
+      if (ext === 'csv') {
+        const text = await file.text();
+        processCSV(text);
+        return;
+      }
+
+      if (ext === 'geojson' || ext === 'json') {
+        const text = await file.text();
+        const gj = JSON.parse(text);
+        const { points } = extractPointsFromGeoJSON(gj);
+        finishPointsLoad(points);
+        return;
+      }
+
+      if (ext === 'kml') {
+        const text = await file.text();
+        const gj = await parseKMLToGeoJSON(text);
+        const { points } = extractPointsFromGeoJSON(gj);
+        finishPointsLoad(points);
+        return;
+      }
+
+      if (ext === 'kmz') {
+        const buf = await file.arrayBuffer();
+        const gj = await parseKMZToGeoJSON(buf);
+        const { points } = extractPointsFromGeoJSON(gj);
+        finishPointsLoad(points);
+        return;
+      }
+
+      if (ext === 'zip') {
+        const buf = await file.arrayBuffer();
+        const gj = await parseShapefileZipToGeoJSON(buf);
+        const { points, nonPointTypes } = extractPointsFromGeoJSON(gj);
+        // Unlike GeoJSON/KML (where mixed geometry types are normal and we
+        // just keep the points), a shapefile is one geometry type for the
+        // whole layer — so a non-point shapefile means the user uploaded
+        // the wrong kind of file entirely, not a file with some
+        // irrelevant extra features. Reject it clearly rather than
+        // silently returning zero points.
+        if (nonPointTypes.size > 0) {
+          fileError.textContent =
+            `This shapefile contains ${Array.from(nonPointTypes).join(', ')} geometry, ` +
+            'not points. Please upload a point shapefile for sample points.';
+          return;
+        }
+        finishPointsLoad(points);
+        return;
+      }
+
+      fileError.textContent =
+        'Unsupported file type. Upload GeoJSON (.geojson/.json), CSV, KML/KMZ, ' +
+        'or a zipped point Shapefile (.zip).';
+    } catch (err) {
+      console.error(err);
+      fileError.textContent = `Could not read this file: ${err.message}`;
+    }
+  });
+
   function processCSV(content) {
+    if (fileSuccess) fileSuccess.textContent = '';
     try {
       const rows = content.split('\n');
       const header = rows[0].split(',');
@@ -495,9 +961,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const lng = parseFloat(cols[lngIndex]);
         if (!isNaN(lat) && !isNaN(lng)) points.push([lng, lat]);
       });
-      if (points.length === 0) { fileError.textContent = 'No valid points found in the CSV file.'; return; }
-      uploadedPointsInput.value = JSON.stringify(points);
-      fileError.textContent = '';
+      finishPointsLoad(points);
     } catch (e) {
       fileError.textContent = 'Error processing CSV file.';
       console.error(e);
@@ -505,7 +969,48 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ----- Selected layers list (now also previews on the map) -----
+  // Dataset paths look like "/Africa/Kenya/kenya_x.tif" (continent/country)
+  // or "/Global/global_x.tif" (no country level). Returns null for a
+  // global dataset (unrestricted) or the country segment for a
+  // country-specific one.
+  function getCountryFromPath(filePath) {
+    const parts = (filePath || '').split(/[\\/]/).filter(Boolean);
+    if (!parts.length) return null;
+    if (parts[0].toLowerCase() === 'global') return null;
+    return parts.length > 1 ? parts[1] : null;
+  }
+
+  // Combining datasets from two different countries produces no valid
+  // sample-point data (their extents never overlap) — catch it at
+  // selection time rather than as a confusing empty/failed analysis
+  // later. Global datasets are always allowed alongside a country one.
+  function findConflictingCountrySelection(newFilePath) {
+    const newCountry = getCountryFromPath(newFilePath);
+    if (!newCountry) return null;
+    let conflict = null;
+    selectedFilesContainer.querySelectorAll('.selected-file-item input[type="hidden"]').forEach((inp) => {
+      if (conflict) return;
+      const existingCountry = getCountryFromPath(inp.value);
+      if (existingCountry && existingCountry !== newCountry) conflict = existingCountry;
+    });
+    return conflict;
+  }
+
   function addSelectedFile(filePath, fileName) {
+    const conflictingCountry = findConflictingCountrySelection(filePath);
+    if (conflictingCountry) {
+      alert(
+        `This dataset is from ${getCountryFromPath(filePath)}, but you already have a ` +
+        `${conflictingCountry} dataset selected. Combining datasets from two different ` +
+        `countries produces no valid output (their areas never overlap). Remove the ` +
+        `${conflictingCountry} dataset first, or choose another ${conflictingCountry} or ` +
+        `Global dataset instead.`
+      );
+      const checkbox = fileListElement.querySelector(`input[type="checkbox"][value="${filePath}"]`);
+      if (checkbox) checkbox.checked = false;
+      return;
+    }
+
     const item = document.createElement('div');
     item.classList.add('mb-2', 'selected-file-item', 'd-flex', 'align-items-center');
     item.innerHTML = `
@@ -531,6 +1036,29 @@ document.addEventListener('DOMContentLoaded', () => {
       if (inp) it.remove();
     });
     MapLayers.removeLayer(filePath);
+  }
+
+  // ----- Sample-point warnings (points excluded per dataset) -----
+  function renderPointWarnings(warnings) {
+    let container = document.getElementById('pointWarnings');
+    const resultSection = document.getElementById('resultSection');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'pointWarnings';
+      container.className = 'alert alert-warning mt-2';
+      if (resultSection) resultSection.insertBefore(container, resultSection.firstChild);
+    }
+    if (!warnings || !warnings.length) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+    container.style.display = 'block';
+    container.innerHTML =
+      '<strong><i class="fas fa-exclamation-triangle"></i> Some sample points were excluded:</strong>' +
+      '<ul class="mb-0 pl-3">' +
+      warnings.map((w) => `<li>${escHtml(w)}</li>`).join('') +
+      '</ul>';
   }
 
   // ----- Chain-workflow links (open the result in Land Statistics) -----
@@ -651,9 +1179,12 @@ document.addEventListener('DOMContentLoaded', () => {
       selectedFiles: Array.from(selectedFiles).map(i => i.querySelector('input[type="hidden"]').value),
       points: pointsInput.value,
       description,
+      aoi: simAoiInput ? simAoiInput.value : '',
     };
 
     try { $('#progressModal').modal('show'); } catch (_) {}
+    if (staleResultNotice) staleResultNotice.style.display = 'none';
+    renderPointWarnings([]);
 
     fetch(API.processLandSimilarity, {
       method: 'POST',
@@ -672,6 +1203,13 @@ document.addEventListener('DOMContentLoaded', () => {
           $('#downloadMessLink').attr('href', messUrl);
           $('#downloadMnobisLink').attr('href', mnobisUrl);
           $('#resultSection').show();
+          resultSectionWasShown = true;
+          if (staleResultNotice) staleResultNotice.style.display = 'none';
+
+          // Sample points excluded because they fell outside a dataset's
+          // extent or landed on NoData — surfaced instead of silently
+          // affecting the result.
+          renderPointWarnings(data.point_warnings || []);
 
           // Chain-workflow buttons: one-click jump into Land Statistics with
           // the result pre-selected. Render once; reuse the same buttons on

@@ -26,4 +26,5 @@ urlpatterns = [
     path('api/tile/<int:z>/<int:x>/<int:y>.png', views.tile_raster, name='tile_raster'),
     path('api/rasterMeta', views.raster_meta, name='raster_meta'),
     path('api/layerMetadata', views.layer_metadata, name='layer_metadata'),
+    path('api/updateLayerMetadata', views.update_layer_metadata, name='update_layer_metadata'),
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

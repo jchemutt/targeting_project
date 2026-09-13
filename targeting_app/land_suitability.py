@@ -43,8 +43,17 @@ def wait_for_valid_raster(path, tries=50, sleep=0.1):
                 pass
         time.sleep(sleep)
     return False
-        
-   
+
+
+def _is_global_dataset_path(raster_url):
+    """True if raster_url sits directly under a "Global" folder (any case),
+    e.g. "data/Global/x.tif" — as opposed to a country-specific path like
+    "data/Africa/Kenya/x.tif". Checks directory segments only, not the
+    filename, so a file literally named "global_x.tif" doesn't false-match.
+    """
+    return any(part.lower() == "global" for part in Path(raster_url).parts[:-1])
+
+
 class LandSuitability(TargetingTool):
     """Tool for determining land suitability based on raster data and user-defined criteria."""
 
@@ -60,6 +69,10 @@ class LandSuitability(TargetingTool):
         self.canRunInBackground = False
         self.parameters = parameters
         self.session = session
+        # idx -> human-readable reason a raster produced no output, so a
+        # partial failure can be explained to the user instead of just
+        # silently vanishing or crashing the whole run.
+        self.skip_reasons = {}
         logging.debug("LandSuitability initialized with parameters: %s", parameters)
 
     def prepare_value_table(self, parameters):
@@ -109,15 +122,33 @@ class LandSuitability(TargetingTool):
             # Extract the first raster's path from OrderedDict
             first_raster_path = None
             if isinstance(in_raster, OrderedDict) and in_raster:
-                first_raster_path = list(in_raster.values())[0].get("url")  # Get first raster file URL
+                raster_urls = [v.get("url") for v in in_raster.values() if v.get("url")]
+                # When a Global dataset is combined with a country-specific
+                # one, prefer the country's folder for the "country"
+                # metadata (used later by Land Statistics' reference-layer
+                # picker) — whichever raster happened to be added FIRST in
+                # the UI isn't a meaningful signal, and a country's own
+                # reference layers are the more useful/specific set to
+                # offer than falling back to Global just because a global
+                # layer was clicked first.
+                first_raster_path = next(
+                    (u for u in raster_urls if not _is_global_dataset_path(u)),
+                    raster_urls[0] if raster_urls else None,
+                )
 
             if first_raster_path:
-                # Extract "data/Africa/Rwanda" (first three parts of the path)
-                path_parts = Path(first_raster_path).parts
-                if len(path_parts) >= 3:
-                    raster_base_path = str(Path(*path_parts[:3]))  # Take first three levels
-                else:
-                    raster_base_path = str(Path(first_raster_path).parent)  # Fallback
+                # The "country"/base-path metadata shown later in the
+                # Statistics tool's reference-layer picker needs the
+                # FOLDER containing this raster, not a fixed number of
+                # path segments. Taking "the first 3 path parts" broke
+                # for Global datasets: "data/Global/x.tif" is only 3
+                # parts total, so that heuristic included the filename
+                # itself as if it were a directory — get_reference_layers
+                # would then try to os.listdir() a .tif file and crash.
+                # The raster's own parent directory is correct for any
+                # nesting depth (data/Global/x.tif -> data/Global;
+                # data/Africa/Kenya/x.tif -> data/Africa/Kenya).
+                raster_base_path = str(Path(first_raster_path).parent)
                 logging.info("Raster base path extracted: %s", raster_base_path)
             else:
                 logging.warning("No raster files found in in_raster.")
@@ -126,20 +157,40 @@ class LandSuitability(TargetingTool):
             # AOI Handling
             aoi_str = self.parameters.get("out_extent", None)
             logging.debug("AOI provided: %s", aoi_str)
-            valid_rasters = self.process_rasters(in_raster, ras_temp_path, aoi_str)
+            valid_rasters, successful_idxs = self.process_rasters(in_raster, ras_temp_path, aoi_str)
 
             if valid_rasters == 0:
                 raise ValueError("No valid rasters intersect the AOI. Check your inputs.")
 
+            # Only combine rasters that actually produced output — a raster
+            # that had no data left after AOI masking never got its
+            # normalized_<idx>.tif written, and combine_rasters would crash
+            # trying to open a nonexistent file if it were still included.
+            in_raster_for_combine = OrderedDict(
+                (idx, params) for idx, params in in_raster.items() if idx in successful_idxs
+            )
+
+            # Build a user-facing explanation for any layer that was
+            # skipped, so a partial result is transparent about what
+            # happened rather than silently proceeding as if nothing was
+            # dropped.
+            warnings = []
+            for idx, params in in_raster.items():
+                if idx in successful_idxs:
+                    continue
+                file_name = os.path.basename(params.get("url", f"raster {idx}"))
+                reason = self.skip_reasons.get(idx, "produced no output (reason unknown)")
+                warnings.append(f"{file_name}: {reason}")
+
             # Combine grouped rasters based on combine parameter
-            combined_raster = self.combine_rasters(in_raster, ras_temp_path)
+            combined_raster = self.combine_rasters(in_raster_for_combine, ras_temp_path)
 
             desc = self.parameters.get("description", None)
 
             # Save and output final result
             final_output = self.save_output(combined_raster, ras_temp_path,raster_base_path,desc)
             logging.info("Execution completed successfully. Output: %s", final_output)
-            return final_output
+            return final_output, warnings
 
         except Exception as e:
             logging.error("Error during execution: %s", e, exc_info=True)
@@ -165,19 +216,56 @@ class LandSuitability(TargetingTool):
     def process_rasters(self, in_raster, ras_temp_path, aoi_input=None):
         """
         Process input rasters: mask with AOI (if provided), normalize, and prepare for combination.
+
+        Returns:
+            tuple: (valid_count, successful_idxs) — successful_idxs is the set
+            of keys from `in_raster` whose normalized_<idx>.tif was actually
+            written. A raster can fail individually (e.g. no data left after
+            AOI masking) without failing the whole run; combine_rasters must
+            only be given the rasters that actually succeeded, or it will
+            crash trying to open a file that was never created.
         """
         logging.debug("Processing rasters with AOI: %s", aoi_input)
         aoi = self.get_extent_from_aoi(aoi_input) if aoi_input else None
-        valid_rasters = 0
-        with ThreadPoolExecutor() as executor:
-            futures = [
-                executor.submit(self.process_single_raster, idx, params, ras_temp_path, aoi)
-                for idx, params in in_raster.items()
-            ]
-            results = [f.result() for f in futures]
-            valid_rasters = sum(results)
-        logging.info("Processed %d valid rasters.", valid_rasters)
-        return valid_rasters
+        idxs = list(in_raster.keys())
+        successful_idxs = set()
+
+        # Seed the shared alignment reference deterministically: process
+        # datasets in the order the user added them, stopping as soon as one
+        # succeeds and defines the reference grid — rather than letting
+        # parallel worker threads race for it. Which raster's I/O happened
+        # to finish first was an accident of timing, not a meaningful
+        # choice, and made alignment behaviour non-reproducible when mixing
+        # rasters of very different native resolution (e.g. a coarse global
+        # layer with a fine country-specific one).
+        ref_raster = os.path.join(ras_temp_path, "aligned_ref.tif")
+        remaining_idxs = list(idxs)
+        for idx in idxs:
+            remaining_idxs.remove(idx)
+            if self.process_single_raster(idx, in_raster[idx], ras_temp_path, aoi):
+                successful_idxs.add(idx)
+            if os.path.exists(ref_raster):
+                break
+
+        # Process whatever's left in parallel now that the reference grid
+        # (if one could be built at all) is fixed.
+        if remaining_idxs:
+            with ThreadPoolExecutor() as executor:
+                futures = {
+                    executor.submit(self.process_single_raster, idx, in_raster[idx], ras_temp_path, aoi): idx
+                    for idx in remaining_idxs
+                }
+                successful_idxs |= {futures[f] for f in futures if f.result()}
+
+        skipped = [idx for idx in idxs if idx not in successful_idxs]
+        if skipped:
+            logging.warning(
+                "%d of %d raster(s) produced no output and were skipped: %s",
+                len(skipped), len(idxs),
+                {idx: self.skip_reasons.get(idx, "unknown reason") for idx in skipped},
+            )
+        logging.info("Processed %d valid rasters.", len(successful_idxs))
+        return len(successful_idxs), successful_idxs
 
     def align_to_reference(self, data, transform, src_crs,ref_raster_path):
         """
@@ -322,39 +410,62 @@ class LandSuitability(TargetingTool):
 
             NO_DATA_VALUE = -32768  # NoData value
 
-            # Open raster with masked values
+            # Open raster. When an AOI is given, read directly via a masked
+            # crop (rasterio.mask.mask) so only the AOI window is ever
+            # pulled into memory — reading the full band first and then
+            # discarding everything outside the AOI was the performance
+            # bottleneck with large/global rasters (multi-minute stalls,
+            # sometimes memory pressure severe enough to fail outright).
             with rasterio.open(raster_path) as src:
                 logging.debug("Raster opened: %s", raster_path)
                 src_meta = src.meta.copy()
                 transform = src.transform
                 crs = src.crs
-                data = src.read(1, masked=True)  # Read as a masked array (preserves NoData)
-
-                # Extract NoData value from raster
                 no_data_value = src.nodata if src.nodata is not None else NO_DATA_VALUE
-                data = np.ma.masked_equal(data, no_data_value)  # Mask NoData values
-                logging.debug("NoData value replaced with masked array")
-
-                # Convert to float32 for consistency
-                data = data.astype(np.float32)
 
                 # Transform AOI to raster CRS and validate overlap
                 if aoi:
                     aoi_transformed = self.transform_aoi_to_raster_crs(aoi, crs)
                     if not self.validate_aoi_overlap(raster_path, aoi_transformed):
-                        logging.warning("Skipping raster as AOI does not overlap: %s", raster_path)
+                        reason = "AOI bounding box does not overlap this raster's extent at all."
+                        logging.warning("Skipping raster %s: %s", raster_path, reason)
+                        self.skip_reasons[idx] = reason
                         return 0  # Skip processing if no overlap
 
-                    # Apply AOI masking
+                    # Apply AOI masking — reads only the cropped window.
                     try:
                         aoi_polygon = [aoi_transformed.__geo_interface__]
-                        data, transform = rasterio.mask.mask(src, aoi_polygon, crop=True,filled=False)
+                        data, transform = rasterio.mask.mask(src, aoi_polygon, crop=True, filled=False)
                         data = data[0]  # Extract single-band data
                         data = data.astype(np.float32)
                         data = np.ma.masked_equal(data, no_data_value)
+                        # Also mask any undeclared NaN/inf fill — a float
+                        # raster with no declared NoData tag but real NaN
+                        # pixels (common for climate layers) would
+                        # otherwise flow through unmasked and contaminate
+                        # every downstream computation NaN touches (the
+                        # alignment reference raster, the combine step,
+                        # threshold comparisons).
+                        data = np.ma.masked_invalid(data)
                     except ValueError as e:
+                        reason = f"AOI masking failed: {e}"
                         logging.error("Masking failed for raster %s: %s", raster_path, e)
+                        self.skip_reasons[idx] = reason
                         return 0
+                else:
+                    # No AOI — full raster extent is genuinely needed.
+                    data = src.read(1, masked=True)
+                    data = np.ma.masked_equal(data, no_data_value)
+                    data = data.astype(np.float32)
+                    # Same undeclared-NaN safety net as the AOI branch above.
+                    data = np.ma.masked_invalid(data)
+
+            # How much real (non-NoData) data this raster has BEFORE
+            # alignment, at its own native resolution — used below to tell
+            # a genuine data-coverage gap (e.g. a land-only dataset over an
+            # all-ocean AOI) apart from something going wrong during
+            # resampling onto the shared analysis grid.
+            pre_align_valid_count = int(np.sum(~data.mask)) if np.ma.is_masked(data) else int(data.size)
 
             # Handle reference raster creation and alignment
             ref_raster = os.path.join(ras_temp_path, "aligned_ref.tif")
@@ -402,7 +513,37 @@ class LandSuitability(TargetingTool):
             # Ensure raster has valid data after masking/alignment
             valid = ~data.mask
             if not np.any(valid):
-                logging.warning("No valid data in raster after masking/alignment. Skipping suitability computation.")
+                if pre_align_valid_count == 0:
+                    # Genuine data-coverage gap: this dataset simply has no
+                    # real (non-NoData) values anywhere inside the AOI, even
+                    # before alignment. Common and expected for land-only
+                    # variables (e.g. an agronomic index) over an AOI that
+                    # is mostly/entirely ocean — there is nothing to
+                    # recover here, it's not a processing defect.
+                    reason = (
+                        "No valid (non-NoData) pixels for this dataset within "
+                        "the AOI — the dataset itself has no coverage here "
+                        "(e.g. an ocean or otherwise out-of-domain area)."
+                    )
+                    logging.warning("Skipping raster %s (idx %s): %s", raster_path, idx, reason)
+                else:
+                    # This one IS suspicious: the raster had real data
+                    # before alignment but ended up with none after being
+                    # resampled onto the shared reference grid. That points
+                    # at an alignment/reprojection issue (grid/CRS mismatch,
+                    # pixel-snapping at the AOI edge) rather than a genuine
+                    # absence of data — flag it loudly so it isn't confused
+                    # with the expected "no coverage here" case above.
+                    reason = (
+                        f"Had {pre_align_valid_count} valid pixel(s) before alignment "
+                        "but 0 after resampling onto the shared analysis grid — "
+                        "likely an alignment/reprojection issue, not missing data."
+                    )
+                    logging.error(
+                        "Raster %s (idx %s) lost all data during alignment: %s",
+                        raster_path, idx, reason,
+                    )
+                self.skip_reasons[idx] = reason
                 return 0
 
             # Optional: log raster range vs user thresholds (do NOT clamp user thresholds)
@@ -461,14 +602,19 @@ class LandSuitability(TargetingTool):
             return 1
 
         except FileNotFoundError:
+            self.skip_reasons[idx] = f"File not found: {params.get('url')}"
             logging.error("[ERROR] File not found: %s", params["url"], exc_info=True)
         except PermissionError:
+            self.skip_reasons[idx] = f"Permission denied reading: {params.get('url')}"
             logging.error("[ERROR] Permission denied when accessing raster: %s", params["url"], exc_info=True)
         except rasterio.errors.RasterioError as e:
+            self.skip_reasons[idx] = f"Rasterio error: {e}"
             logging.error("[ERROR] Rasterio processing error: %s", e, exc_info=True)
         except ValueError as e:
+            self.skip_reasons[idx] = f"Invalid input: {e}"
             logging.error("[ERROR] ValueError while processing raster: %s", e, exc_info=True)
         except Exception as e:
+            self.skip_reasons[idx] = f"Unexpected error: {e}"
             logging.error("[ERROR] Unexpected error while processing raster: %s", e, exc_info=True)
 
         return 0

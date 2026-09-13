@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 from scipy.spatial.distance import mahalanobis
 import rasterio
-from rasterio.warp import reproject, Resampling, calculate_default_transform
+import rasterio.mask
+from rasterio.warp import reproject, Resampling, calculate_default_transform, transform_geom
 from typing import List, Tuple, Optional
 
 
@@ -14,17 +15,44 @@ from typing import List, Tuple, Optional
 # Raster I/O and reprojection
 # -----------------------------
 
-def read_raster_with_nodata(raster_path: str):
+def read_raster_with_nodata(raster_path: str, aoi_geojson: Optional[dict] = None):
     """
     Read a single-band raster as float32 with nodata -> NaN.
+
+    If ``aoi_geojson`` (a GeoJSON geometry dict in EPSG:4326) is given,
+    reads only the AOI-cropped window instead of the whole file — this
+    matters a lot for global datasets, where reading the entire raster
+    unconditionally is needlessly slow and memory-heavy (potentially a
+    multi-minute stall) when the analysis only actually needs a small
+    region.
+
     Returns: (array[H,W], transform, crs, nodata, width, height)
     """
     with rasterio.open(raster_path) as src:
-        arr = src.read(1).astype("float32", copy=False)
         nodata = src.nodata
+        if aoi_geojson is not None:
+            # Reproject the AOI into this raster's own CRS — different
+            # selected rasters can be in different CRSs, so this has to
+            # happen per-raster, not once globally.
+            aoi_native = transform_geom('EPSG:4326', src.crs, aoi_geojson)
+            # filled=False + cast to float32 first, then explicitly fill
+            # with NaN — matches the pattern used elsewhere in this
+            # codebase (land_suitability.py) and avoids passing a NaN
+            # fill value into rasterio.mask.mask itself, which can be
+            # unreliable for a source raster whose native dtype is an
+            # integer type.
+            masked, transform = rasterio.mask.mask(src, [aoi_native], crop=True, filled=False)
+            arr = masked[0].astype("float32", copy=False)
+            arr = np.ma.filled(arr, np.nan)
+            height, width = arr.shape
+        else:
+            arr = src.read(1).astype("float32", copy=False)
+            transform = src.transform
+            width, height = src.width, src.height
+
         if nodata is not None:
             arr = np.where(arr == nodata, np.nan, arr)
-        return arr, src.transform, src.crs, nodata, src.width, src.height
+        return arr, transform, src.crs, nodata, width, height
 
 
 def reproject_to_match(src_arr: np.ndarray,
@@ -142,9 +170,15 @@ def write_raster_reprojected_to_epsg4326(data: np.ndarray,
 # Stacking on a common template
 # -----------------------------
 
-def stack_rasters_to_template(file_paths: List[str]):
+def stack_rasters_to_template(file_paths: List[str], aoi_geojson: Optional[dict] = None):
     """
     Reads all rasters and reprojects them to the first raster's grid.
+
+    ``aoi_geojson`` (a GeoJSON geometry dict in EPSG:4326), when given,
+    crops every raster read to that AOI window first — for a global
+    dataset, this is the difference between reading (and reprojecting) a
+    handful of megabytes versus the entire planet.
+
     Returns:
       df        : DataFrame (n_pixels x n_bands)
       shape     : (height, width)
@@ -157,7 +191,8 @@ def stack_rasters_to_template(file_paths: List[str]):
         raise ValueError("No raster file paths provided.")
 
     # Template = first raster
-    t_arr, t_transform, t_crs, t_nodata, t_w, t_h = read_raster_with_nodata(file_paths[0])
+    t_arr, t_transform, t_crs, t_nodata, t_w, t_h = read_raster_with_nodata(
+        file_paths[0], aoi_geojson=aoi_geojson)
     raster_shape = (t_h, t_w)
     n_pixels = t_h * t_w
 
@@ -165,7 +200,7 @@ def stack_rasters_to_template(file_paths: List[str]):
     df = pd.DataFrame(t_arr.reshape(-1))
 
     for fp in file_paths[1:]:
-        arr, tr, crs, nd, w, h = read_raster_with_nodata(fp)
+        arr, tr, crs, nd, w, h = read_raster_with_nodata(fp, aoi_geojson=aoi_geojson)
         if (crs != t_crs) or (tr != t_transform) or (w != t_w) or (h != t_h):
             arr = reproject_to_match(arr, tr, crs, t_transform, t_crs, t_w, t_h)
         df = pd.concat([df, pd.DataFrame(arr.reshape(-1))], axis=1)
@@ -355,13 +390,17 @@ def calculate_mess(threshold_df: pd.DataFrame,
 # -----------------------------
 
 def similarity_analysis(total_files: int, work_space: str, file_paths: List[str],
-                        reproject_outputs_to_4326: bool = False):
+                        reproject_outputs_to_4326: bool = False,
+                        aoi_geojson: Optional[dict] = None):
     """
     Main entry point.
     - total_files: expected number of raster variables (should match len(file_paths))
     - work_space: output directory where temp.csv exists and results will be written
     - file_paths: list of absolute or relative raster paths
     - reproject_outputs_to_4326: if True, output GeoTIFFs are reprojected to EPSG:4326
+    - aoi_geojson: optional GeoJSON geometry (EPSG:4326) to crop every raster to
+      before stacking — keeps a global dataset from being read/processed in full
+      when only a small region is actually needed.
     """
     try:
         print("Starting similarity analysis...")
@@ -377,7 +416,8 @@ def similarity_analysis(total_files: int, work_space: str, file_paths: List[str]
         threshold = pd.read_csv(threshold_csv)
 
         # Stack rasters to the first raster's grid
-        df, raster_shape, transform, crs, nodata, band_names = stack_rasters_to_template(file_paths)
+        df, raster_shape, transform, crs, nodata, band_names = stack_rasters_to_template(
+            file_paths, aoi_geojson=aoi_geojson)
 
         # Safety: ensure expected variable count
         if df.shape[1] != total_files:

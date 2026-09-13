@@ -30,6 +30,10 @@
             </div>
         </aside>
 
+        <div class="resize-handle resize-handle-vertical" data-resize-handle
+             data-resize-target=".panel-layers" data-resize-axis="width"
+             data-resize-min="160" data-resize-max="640"></div>
+
         {# ---------- CENTRE COLUMN: map + criteria table ---------- #}
         <div class="suit-center">
 
@@ -40,6 +44,10 @@
                 <div id="mapLayersControl" class="map-layers-control" style="display:none;"></div>
             </div>
         </section>
+
+        <div class="resize-handle resize-handle-horizontal" data-resize-handle
+             data-resize-target=".panel-table" data-resize-axis="height"
+             data-resize-invert="true" data-resize-min="80" data-resize-max="700"></div>
 
         {# ---------- BOTTOM: selected data / criteria ---------- #}
         <section class="suit-panel panel-table">
@@ -57,6 +65,10 @@
         </section>
 
         </div>
+
+        <div class="resize-handle resize-handle-vertical" data-resize-handle
+             data-resize-target=".panel-side" data-resize-axis="width"
+             data-resize-invert="true" data-resize-min="220" data-resize-max="640"></div>
 
         {# ---------- RIGHT: area of interest + run ---------- #}
         <aside class="suit-panel panel-side">
@@ -118,6 +130,9 @@
                         <button type="submit" class="btn btn-primary btn-block" id="submitBtn">
                             <i class="fas fa-play"></i> Run Analysis
                         </button>
+                        <button type="button" class="btn btn-outline-secondary btn-block" id="resetAllBtn">
+                            <i class="fas fa-undo"></i> Clear datasets, AOI &amp; results
+                        </button>
                     </form>
 
                     <div id="resultSection" class="mt-3" style="display: none;">
@@ -125,6 +140,7 @@
                         <a id="downloadLink" href="#" class="btn btn-success btn-sm" download>
                             <i class="fas fa-download"></i> Download Result
                         </a>
+                        <small data-retention-notice class="text-muted d-block mt-2"></small>
                     </div>
                 </div>
 
@@ -147,5 +163,7 @@
     <script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
     <script src="https://unpkg.com/@tmcw/togeojson@5.8.0/dist/togeojson.umd.js"></script>
     <script src="{% static 'targeting_app/js/directory_browser.js' %}"></script>
+    <script src="{% static 'targeting_app/js/panel_resize.js' %}"></script>
+    <script src="{% static 'targeting_app/js/retention_notice.js' %}"></script>
     <script src="{% static 'targeting_app/js/appv1.js' %}"></script>
 {% endblock %}

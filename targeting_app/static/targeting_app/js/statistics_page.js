@@ -353,8 +353,8 @@ document.addEventListener('DOMContentLoaded', function () {
       ),
     };
     baseLayers.Street.addTo(map);
-    L.control.layers(baseLayers, null, { position: "bottomleft", collapsed: true }).addTo(map);
-    L.control.scale({ position: "bottomleft", imperial: false }).addTo(map);
+    L.control.layers(baseLayers, null, { position: "bottomright", collapsed: true }).addTo(map);
+    L.control.scale({ position: "bottomright", imperial: false }).addTo(map);
 
     // Click any pixel to see its value in every visible raster.
     map.on('click', async (e) => {
